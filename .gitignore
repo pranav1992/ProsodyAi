@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# backend runtime
+backend/storage/
+backend/*.db
+backend/.env
+
+# notebook scratch artifacts (regenerated on run, not deliverables)
+.ipynb_checkpoints/
+backend/notebooks/_synthetic_calls/
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env
+frontend/.env.local
+
+# OS
+.DS_Store
+
+# editors
+.vscode/
+.idea/
