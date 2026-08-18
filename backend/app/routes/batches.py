@@ -1,0 +1,145 @@
+import csv
+import io
+import json
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
+from app.auth import get_current_user
+from app.database import get_db
+from app.models import AudioResult, Batch, User
+from app.schemas import AudioResultOut, BatchDetailOut, BatchOut
+from app.services.batch_processor import process_batch
+from app.services.storage import extract_zip, find_manifest, list_audio_files
+from app.utils.csv_manifest import parse_and_validate
+
+router = APIRouter(prefix="/batches", tags=["batches"])
+
+RESULT_FIELDS = [
+    "emotional_tone", "emotional_intensity", "background_noise_present",
+    "background_noise_type", "background_noise_severity", "audio_quality",
+    "speaker_overlap_present", "long_silence_present", "confidence",
+]
+
+
+@router.post("", response_model=BatchDetailOut)
+async def upload_batch(
+    background_tasks: BackgroundTasks,
+    file: UploadFile,
+    name: str = "",
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not file.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Upload must be a .zip archive containing audio files and a CSV manifest")
+
+    zip_bytes = await file.read()
+
+    batch = Batch(name=name or file.filename, owner_id=user.id, status="pending")
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+
+    directory = extract_zip(zip_bytes, batch.id)
+    audio_files = list_audio_files(directory)
+    manifest_path = find_manifest(directory)
+
+    if manifest_path is None:
+        batch.status = "failed"
+        db.commit()
+        raise HTTPException(status_code=400, detail="No CSV manifest found at the root of the uploaded archive")
+
+    validation = parse_and_validate(manifest_path.read_bytes(), audio_files)
+    if validation.errors:
+        batch.status = "failed"
+        db.commit()
+        raise HTTPException(status_code=400, detail={"manifest_errors": validation.errors})
+
+    if not validation.matched:
+        batch.status = "failed"
+        db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "No audio files matched the manifest",
+                "missing_audio": validation.missing_audio,
+                "unmatched_files": validation.unmatched_files,
+            },
+        )
+
+    for filename, expected_json in validation.matched.items():
+        db.add(AudioResult(
+            batch_id=batch.id,
+            filename=filename,
+            status="pending",
+            expected_json=expected_json or None,
+        ))
+    batch.total_files = len(validation.matched)
+    db.commit()
+    db.refresh(batch)
+
+    background_tasks.add_task(process_batch, batch.id)
+
+    out = BatchDetailOut.model_validate(batch)
+    return out
+
+
+@router.get("", response_model=list[BatchOut])
+def list_batches(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return db.query(Batch).filter(Batch.owner_id == user.id).order_by(Batch.created_at.desc()).all()
+
+
+@router.get("/{batch_id}", response_model=BatchDetailOut)
+def get_batch(batch_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    batch = db.query(Batch).filter(Batch.id == batch_id, Batch.owner_id == user.id).first()
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return batch
+
+
+def _result_to_dict(r: AudioResult) -> dict:
+    return {
+        "name": r.filename,
+        "status": r.status,
+        "error_message": r.error_message,
+        "result_json": json.dumps({f: getattr(r, f) for f in RESULT_FIELDS}) if r.status == "done" else "",
+    }
+
+
+@router.get("/{batch_id}/download")
+def download_results(
+    batch_id: str,
+    format: str = "csv",
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    batch = db.query(Batch).filter(Batch.id == batch_id, Batch.owner_id == user.id).first()
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    results = db.query(AudioResult).filter(AudioResult.batch_id == batch_id).all()
+
+    if format == "json":
+        payload = [
+            {"name": r.filename, "status": r.status, "error_message": r.error_message,
+             **{f: getattr(r, f) for f in RESULT_FIELDS}}
+            for r in results
+        ]
+        content = json.dumps(payload, indent=2)
+        return StreamingResponse(
+            io.BytesIO(content.encode()),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{batch_id}_results.json"'},
+        )
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=["name", "status", "error_message", "result_json"])
+    writer.writeheader()
+    for r in results:
+        writer.writerow(_result_to_dict(r))
+    return StreamingResponse(
+        io.BytesIO(buffer.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{batch_id}_results.csv"'},
+    )
