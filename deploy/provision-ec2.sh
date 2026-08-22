@@ -95,8 +95,11 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y git docker.io docker-compose-v2
 systemctl enable --now docker
+usermod -aG docker ubuntu
+git config --system --add safe.directory /opt/prosodyai
 
 git clone $REPO_URL /opt/prosodyai
+chown -R ubuntu:ubuntu /opt/prosodyai
 cd /opt/prosodyai
 
 cat > .env <<'ENVEOF'
