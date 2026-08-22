@@ -54,6 +54,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail));
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -72,6 +73,10 @@ export function listBatches(): Promise<Batch[]> {
 
 export function getBatch(id: string): Promise<BatchDetail> {
   return request<BatchDetail>(`/batches/${id}`);
+}
+
+export function deleteBatch(id: string): Promise<void> {
+  return request<void>(`/batches/${id}`, { method: "DELETE" });
 }
 
 export async function uploadBatch(file: File, name: string): Promise<BatchDetail> {

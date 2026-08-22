@@ -11,7 +11,7 @@ from app.database import get_db
 from app.models import AudioResult, Batch, User
 from app.schemas import AudioResultOut, BatchDetailOut, BatchOut
 from app.services.batch_processor import process_batch
-from app.services.storage import extract_zip, find_manifest, list_audio_files
+from app.services.storage import cleanup_batch, extract_zip, find_manifest, list_audio_files
 from app.utils.csv_manifest import parse_and_validate
 
 router = APIRouter(prefix="/batches", tags=["batches"])
@@ -96,6 +96,16 @@ def get_batch(batch_id: str, db: Session = Depends(get_db), user: User = Depends
     if batch is None:
         raise HTTPException(status_code=404, detail="Batch not found")
     return batch
+
+
+@router.delete("/{batch_id}", status_code=204)
+def delete_batch(batch_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    batch = db.query(Batch).filter(Batch.id == batch_id, Batch.owner_id == user.id).first()
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    db.delete(batch)
+    db.commit()
+    cleanup_batch(batch_id)
 
 
 def _result_to_dict(r: AudioResult) -> dict:

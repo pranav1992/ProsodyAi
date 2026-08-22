@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import type { Batch } from "@/lib/api";
+import { deleteBatch, type Batch } from "@/lib/api";
 
 const STATUS_COLORS: Record<Batch["status"], string> = {
   pending: "bg-gray-700 text-gray-200",
@@ -10,9 +11,24 @@ const STATUS_COLORS: Record<Batch["status"], string> = {
   failed: "bg-red-800 text-red-100",
 };
 
-export default function BatchList({ batches }: { batches: Batch[] }) {
+export default function BatchList({ batches, onDeleted }: { batches: Batch[]; onDeleted: () => void }) {
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   if (batches.length === 0) {
     return <p className="text-sm text-gray-500">No batches uploaded yet.</p>;
+  }
+
+  async function handleDelete(b: Batch) {
+    if (!window.confirm(`Delete "${b.name}"? This cannot be undone.`)) return;
+    setDeletingId(b.id);
+    try {
+      await deleteBatch(b.id);
+      onDeleted();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Failed to delete batch");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -24,6 +40,7 @@ export default function BatchList({ batches }: { batches: Batch[] }) {
             <th className="px-4 py-2">Status</th>
             <th className="px-4 py-2">Progress</th>
             <th className="px-4 py-2">Created</th>
+            <th className="px-4 py-2"></th>
           </tr>
         </thead>
         <tbody>
@@ -42,6 +59,15 @@ export default function BatchList({ batches }: { batches: Batch[] }) {
                 {b.failed_files > 0 && <span className="ml-2 text-red-400">({b.failed_files} failed)</span>}
               </td>
               <td className="px-4 py-3 text-gray-500">{new Date(b.created_at).toLocaleString()}</td>
+              <td className="px-4 py-3 text-right">
+                <button
+                  onClick={() => handleDelete(b)}
+                  disabled={deletingId === b.id}
+                  className="rounded border border-gray-700 px-2 py-1 text-xs text-red-400 hover:bg-red-950 disabled:opacity-50"
+                >
+                  {deletingId === b.id ? "Deleting..." : "Delete"}
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>

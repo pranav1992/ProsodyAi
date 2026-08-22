@@ -52,7 +52,7 @@ export default function DashboardPage() {
       </div>
 
       <h2 className="mb-3 text-lg font-semibold text-white">Batches</h2>
-      {loading ? <p className="text-sm text-gray-500">Loading...</p> : <BatchList batches={batches} />}
+      {loading ? <p className="text-sm text-gray-500">Loading...</p> : <BatchList batches={batches} onDeleted={refresh} />}
     </div>
   );
 }
