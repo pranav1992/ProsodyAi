@@ -34,7 +34,9 @@ split was chosen over sending raw audio to an audio-native model.
 backend/     FastAPI service: pipeline, batch processing, auth, REST API
 frontend/    Next.js dashboard: login, batch upload, results, download
 scripts/     (in backend/) leave-one-call-out validation script
-docker-compose.yml   local dev: postgres + backend + frontend
+deploy/               AWS EC2 pilot: provision/destroy scripts (see below)
+.github/workflows/    GitHub Actions: auto-deploy to EC2 on push to main
+docker-compose.yml    local dev: postgres + backend + frontend
 render.yaml           one-shot Render deployment config
 ```
 
@@ -95,11 +97,18 @@ evaluation_batch.zip
 └── labels.csv          # name,result_json  (result_json empty/omitted for unlabeled hidden set)
 ```
 
+Audio files may be `.wav`, `.mp3`, `.m4a`, `.ogg`, or `.flac` — anything else
+at the archive root is ignored (see `SUPPORTED_AUDIO_EXTENSIONS` in
+`backend/app/services/storage.py`). All formats are decoded uniformly via
+ffmpeg before transcription.
+
 Upload the zip from the dashboard after logging in. The dashboard validates
 the manifest, reports unmatched/missing files, processes each valid clip
 in the background, and shows live per-file progress. Results are
 downloadable as CSV or JSON once complete; individual file failures don't
-block the rest of the batch.
+block the rest of the batch. Batches can be deleted from the dashboard
+(with a confirmation prompt) once you're done with them — this permanently
+removes the batch and all of its results.
 
 ## Deployment (Render)
 
@@ -116,6 +125,54 @@ block the rest of the batch.
 Whisper transcription runs on CPU by default (`WHISPER_DEVICE=cpu`,
 `WHISPER_MODEL_SIZE=base`) — no GPU instance required, which keeps hosting
 cost predictable. See LATENCY.md for measured throughput on this configuration.
+
+## Deployment (AWS EC2 pilot)
+
+For a single-instance pilot deployment — the cheapest/simplest option, see
+the tradeoffs at the end of this section — `deploy/provision-ec2.sh` scripts
+the whole thing: one `t3.medium` running all three containers via Docker Compose,
+behind a fixed Elastic IP, with a security group that only exposes SSH to
+your current IP and the app ports (3000, 8000) to the public — the database
+is never exposed.
+
+```bash
+# needs: AWS CLI configured (`aws configure`) with EC2 permissions,
+# and OPENAI_API_KEY either exported or already in backend/.env
+./deploy/provision-ec2.sh
+```
+
+This allocates an Elastic IP, generates fresh random secrets (JWT signing
+key, Postgres password, admin password), launches the instance, and prints
+the app URL plus login credentials once bootstrap finishes (a few minutes —
+it's installing Docker, cloning the repo, and building both images from
+scratch). Resource IDs are saved to `deploy/.state` (gitignored) so the
+matching teardown script knows what to remove:
+
+```bash
+./deploy/destroy-ec2.sh
+```
+
+**Auto-deploy on push:** `.github/workflows/deploy.yml` SSHes into the
+instance on every push to `main` and runs `git pull && docker compose up -d
+--build`. It needs two repository secrets (Settings → Secrets and variables
+→ Actions), which you should set directly from your own machine rather than
+routing the private key through anyone else:
+
+- `EC2_HOST` — the instance's Elastic IP
+- `EC2_SSH_KEY` — contents of the `.pem` file `provision-ec2.sh` saved to
+  `~/.ssh/prosodyai-pilot.pem`
+
+**Cost:** roughly $30–35/month for continuous `t3.medium` + 30GB gp3 +
+Elastic IP. Stop the instance when not in use to only pay for storage:
+`aws ec2 stop-instances --instance-ids <id> --region ap-south-1` (and
+`start-instances` to resume — the Elastic IP re-attaches automatically).
+
+This is intentionally the cheapest/simplest option for a single pilot
+instance, not the most scalable one. Terraform + ECS Fargate (with the
+Whisper processing split into its own worker/queue instead of the current
+in-process `BackgroundTasks`) would be worth the extra setup once there's a
+second environment to keep in sync or a need to scale transcription
+horizontally.
 
 ## Known limitations / next steps
 
