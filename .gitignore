@@ -22,6 +22,9 @@ frontend/out/
 frontend/.env
 frontend/.env.local
 
+# deploy state (live resource IDs for one specific deployment)
+deploy/.state
+
 # OS
 .DS_Store
 
