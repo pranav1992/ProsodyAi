@@ -2,15 +2,13 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: autoace
-      POSTGRES_PASSWORD: autoace
-      POSTGRES_DB: autoace
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-autoace}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autoace}
+      POSTGRES_DB: ${POSTGRES_DB:-autoace}
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U autoace"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autoace}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -20,8 +18,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://autoace:autoace@db:5432/autoace
-      JWT_SECRET: local-dev-secret
+      DATABASE_URL: postgresql://${POSTGRES_USER:-autoace}:${POSTGRES_PASSWORD:-autoace}@db:5432/${POSTGRES_DB:-autoace}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       CLASSIFICATION_MODEL: gpt-4o-mini
       WHISPER_MODEL_SIZE: base
@@ -30,7 +28,7 @@ services:
       STORAGE_DIR: /app/storage
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@autoace.ai}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme123}
-      CORS_ORIGINS: http://localhost:3000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     volumes:
       - backend_storage:/app/storage
     depends_on:
@@ -41,7 +39,7 @@ services:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     ports:
       - "3000:3000"
     depends_on:
