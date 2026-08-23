@@ -34,7 +34,7 @@ split was chosen over sending raw audio to an audio-native model.
 backend/     FastAPI service: pipeline, batch processing, auth, REST API
 frontend/    Next.js dashboard: login, batch upload, results, download
 scripts/     (in backend/) leave-one-call-out validation script
-deploy/               AWS EC2 pilot: provision/destroy scripts (see below)
+deploy/               AWS EC2 pilot: provision/stop/start/destroy scripts (see below)
 .github/workflows/    GitHub Actions: auto-deploy to EC2 on push to main
 docker-compose.yml    local dev: postgres + backend + frontend
 render.yaml           one-shot Render deployment config
@@ -163,9 +163,18 @@ routing the private key through anyone else:
   `~/.ssh/prosodyai-pilot.pem`
 
 **Cost:** roughly $30–35/month for continuous `t3.medium` + 30GB gp3 +
-Elastic IP. Stop the instance when not in use to only pay for storage:
-`aws ec2 stop-instances --instance-ids <id> --region ap-south-1` (and
-`start-instances` to resume — the Elastic IP re-attaches automatically).
+Elastic IP. Stop the instance when not in use to only pay for storage
+(~$2.74/month for the 30GB volume) plus the small idle-EIP charge:
+
+```bash
+./deploy/stop-ec2.sh    # pause billing for compute
+./deploy/start-ec2.sh   # resume — same Elastic IP, containers restart on their own
+```
+
+Both read the instance ID from `deploy/.state`, same as `provision-ec2.sh`
+and `destroy-ec2.sh` — nothing to look up or copy-paste. Since every service
+in `docker-compose.yml` runs with `restart: unless-stopped`, no manual SSH
+step is needed after starting back up.
 
 This is intentionally the cheapest/simplest option for a single pilot
 instance, not the most scalable one. Terraform + ECS Fargate (with the
