@@ -57,6 +57,11 @@ docker compose up --build
 - Login with `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `backend/.env` (defaults:
   `admin@autoace.ai` / `changeme123` — **change these before deploying**).
 
+To stop: `Ctrl+C` if running in the foreground, or `docker compose down` from
+another terminal. Either way the `db_data` and `backend_storage` named
+volumes persist, so your database and any in-progress batch files survive a
+restart — add `-v` to `docker compose down` to wipe them too.
+
 ### Without Docker
 
 ```bash
@@ -73,6 +78,11 @@ npm install
 cp .env.example .env.local
 npm run dev
 ```
+
+Both `uvicorn --reload` and `npm run dev` run in the foreground — `Ctrl+C`
+in each terminal stops them. Nothing else to clean up: no containers or
+volumes are created in this path (the sqlite file at `backend/autoace.db`
+persists on disk between runs, same as the Docker path's `db_data` volume).
 
 ## Running validation against the labeled calls
 
