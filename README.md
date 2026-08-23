@@ -35,7 +35,7 @@ backend/     FastAPI service: pipeline, batch processing, auth, REST API
 frontend/    Next.js dashboard: login, batch upload, results, download
 scripts/     (in backend/) leave-one-call-out validation script
 deploy/               AWS EC2 pilot: provision/stop/start/destroy scripts (see below)
-.github/workflows/    GitHub Actions: auto-deploy to EC2 on push to main
+.github/workflows/    GitHub Actions: manually-triggered deploy to EC2
 docker-compose.yml    local dev: postgres + backend + frontend
 render.yaml           one-shot Render deployment config
 ```
@@ -162,11 +162,13 @@ matching teardown script knows what to remove:
 ./deploy/destroy-ec2.sh
 ```
 
-**Auto-deploy on push:** `.github/workflows/deploy.yml` SSHes into the
-instance on every push to `main` and runs `git pull && docker compose up -d
---build`. It needs two repository secrets (Settings → Secrets and variables
-→ Actions), which you should set directly from your own machine rather than
-routing the private key through anyone else:
+**Deploy via GitHub Actions (manual trigger):** `.github/workflows/deploy.yml`
+SSHes into the instance and runs `git pull && docker compose up -d --build`.
+It does *not* run automatically on push — trigger it from the repo's Actions
+tab (`Deploy to EC2` → `Run workflow`) whenever you actually want to ship
+what's on `main`. It needs two repository secrets (Settings → Secrets and
+variables → Actions), which you should set directly from your own machine
+rather than routing the private key through anyone else:
 
 - `EC2_HOST` — the instance's Elastic IP
 - `EC2_SSH_KEY` — contents of the `.pem` file `provision-ec2.sh` saved to
