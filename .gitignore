@@ -11,6 +11,10 @@ backend/storage/
 backend/*.db
 backend/.env
 
+# root .env (docker-compose secrets: JWT_SECRET, DB password, admin password --
+# used both for local `docker compose up` and written by deploy/provision-ec2.sh)
+/.env
+
 # notebook scratch artifacts (regenerated on run, not deliverables)
 .ipynb_checkpoints/
 backend/notebooks/_synthetic_calls/
