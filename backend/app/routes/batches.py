@@ -2,13 +2,14 @@ import csv
 import io
 import json
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import AudioResult, Batch, User
+from app.rate_limit import limiter
 from app.schemas import AudioResultOut, BatchDetailOut, BatchOut
 from app.services.batch_processor import process_batch
 from app.services.storage import cleanup_batch, extract_zip, find_manifest, list_audio_files
@@ -24,7 +25,9 @@ RESULT_FIELDS = [
 
 
 @router.post("", response_model=BatchDetailOut)
+@limiter.limit("5/hour")
 async def upload_batch(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile,
     name: str = "",
@@ -86,12 +89,14 @@ async def upload_batch(
 
 
 @router.get("", response_model=list[BatchOut])
-def list_batches(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+@limiter.limit("30/minute")
+def list_batches(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return db.query(Batch).filter(Batch.owner_id == user.id).order_by(Batch.created_at.desc()).all()
 
 
 @router.get("/{batch_id}", response_model=BatchDetailOut)
-def get_batch(batch_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+@limiter.limit("30/minute")
+def get_batch(request: Request, batch_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     batch = db.query(Batch).filter(Batch.id == batch_id, Batch.owner_id == user.id).first()
     if batch is None:
         raise HTTPException(status_code=404, detail="Batch not found")
@@ -99,7 +104,8 @@ def get_batch(batch_id: str, db: Session = Depends(get_db), user: User = Depends
 
 
 @router.delete("/{batch_id}", status_code=204)
-def delete_batch(batch_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+@limiter.limit("10/minute")
+def delete_batch(request: Request, batch_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     batch = db.query(Batch).filter(Batch.id == batch_id, Batch.owner_id == user.id).first()
     if batch is None:
         raise HTTPException(status_code=404, detail="Batch not found")
@@ -118,7 +124,9 @@ def _result_to_dict(r: AudioResult) -> dict:
 
 
 @router.get("/{batch_id}/download")
+@limiter.limit("15/minute")
 def download_results(
+    request: Request,
     batch_id: str,
     format: str = "csv",
     db: Session = Depends(get_db),

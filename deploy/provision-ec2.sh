@@ -66,14 +66,13 @@ aws ec2 create-key-pair --key-name "$KEY_NAME" --query "KeyMaterial" --output te
 chmod 400 "$SSH_KEY_PATH"
 echo "    saved to $SSH_KEY_PATH"
 
-echo "==> Creating security group (22 from $MY_IP only, 3000+8000 public, no DB port)..."
+echo "==> Creating security group (22 from $MY_IP only, 80 public via nginx, no DB port, backend/frontend ports loopback-only)..."
 SG_ID="$(aws ec2 create-security-group \
   --group-name "$SG_NAME" \
-  --description "ProsodyAI pilot: SSH from admin IP, app ports public, DB internal-only" \
+  --description "ProsodyAI pilot: SSH from admin IP, nginx on 80 (geo-restricted app-side), DB internal-only" \
   --vpc-id "$VPC_ID" --region "$REGION" --query "GroupId" --output text)"
 aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22 --cidr "${MY_IP}/32" --region "$REGION" >/dev/null
-aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 3000 --cidr 0.0.0.0/0 --region "$REGION" >/dev/null
-aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 8000 --cidr 0.0.0.0/0 --region "$REGION" >/dev/null
+aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 80 --cidr 0.0.0.0/0 --region "$REGION" >/dev/null
 aws ec2 create-tags --resources "$SG_ID" --tags Key=Name,Value=prosodyai-pilot --region "$REGION"
 echo "    $SG_ID"
 
@@ -93,7 +92,7 @@ exec > >(tee -a /var/log/prosodyai-bootstrap.log) 2>&1
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y git docker.io docker-compose-v2
+apt-get install -y git docker.io docker-compose-v2 nginx curl
 systemctl enable --now docker
 usermod -aG docker ubuntu
 git config --system --add safe.directory /opt/prosodyai
@@ -111,11 +110,19 @@ POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 POSTGRES_DB=autoace
 ADMIN_EMAIL=$ADMIN_EMAIL
 ADMIN_PASSWORD=$ADMIN_PASSWORD
-CORS_ORIGINS=http://$PUBLIC_IP:3000
-NEXT_PUBLIC_API_URL=http://$PUBLIC_IP:8000
+CORS_ORIGINS=http://$PUBLIC_IP
+NEXT_PUBLIC_API_URL=http://$PUBLIC_IP
 ENVEOF
 
 docker compose up -d --build
+
+echo "==> Setting up nginx (reverse proxy)..."
+cp deploy/nginx/prosodyai.conf /etc/nginx/sites-available/prosodyai.conf
+rm -f /etc/nginx/sites-enabled/default
+ln -sf /etc/nginx/sites-available/prosodyai.conf /etc/nginx/sites-enabled/prosodyai.conf
+nginx -t
+systemctl enable --now nginx
+systemctl reload nginx
 
 echo "BOOTSTRAP COMPLETE"
 USERDATA
@@ -153,7 +160,7 @@ echo "Done. Docker build + first boot takes several minutes (Whisper/ML deps + N
 echo "Watch progress:  ssh -i $SSH_KEY_PATH ubuntu@$PUBLIC_IP 'tail -f /var/log/prosodyai-bootstrap.log'"
 echo
 echo "Once ready:"
-echo "  App:      http://$PUBLIC_IP:3000"
+echo "  App:      http://$PUBLIC_IP"
 echo "  Login:    $ADMIN_EMAIL / $ADMIN_PASSWORD"
 echo "  SSH:      ssh -i $SSH_KEY_PATH ubuntu@$PUBLIC_IP"
 echo

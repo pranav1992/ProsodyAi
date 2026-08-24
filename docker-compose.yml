@@ -18,7 +18,7 @@ services:
     build: ./backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-autoace}:${POSTGRES_PASSWORD:-autoace}@db:5432/${POSTGRES_DB:-autoace}
       JWT_SECRET: ${JWT_SECRET:-local-dev-secret}
@@ -44,7 +44,7 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - backend
 

@@ -124,9 +124,11 @@ removes the batch and all of its results.
 For a single-instance pilot deployment — the cheapest/simplest option, see
 the tradeoffs at the end of this section — `deploy/provision-ec2.sh` scripts
 the whole thing: one `t3.medium` running all three containers via Docker Compose,
-behind a fixed Elastic IP, with a security group that only exposes SSH to
-your current IP and the app ports (3000, 8000) to the public — the database
-is never exposed.
+behind a fixed Elastic IP, with nginx (`deploy/nginx/prosodyai.conf`) as the
+single public entry point on port 80. The security group only exposes SSH to
+your current IP and port 80 to the public — the backend/frontend container
+ports (8000/3000) are bound to loopback only, and the database is never
+exposed.
 
 Whisper transcription runs on CPU by default (`WHISPER_DEVICE=cpu`,
 `WHISPER_MODEL_SIZE=base`) — no GPU instance required, which keeps hosting
@@ -150,8 +152,9 @@ matching teardown script knows what to remove:
 ```
 
 **Deploy via GitHub Actions (manual trigger):** `.github/workflows/deploy.yml`
-SSHes into the instance and runs `git pull && docker compose up -d --build`.
-It does *not* run automatically on push — trigger it from the repo's Actions
+SSHes into the instance, runs `git pull && docker compose up -d --build`, and
+resyncs the nginx config in case `deploy/nginx/prosodyai.conf` changed. It
+does *not* run automatically on push — trigger it from the repo's Actions
 tab (`Deploy to EC2` → `Run workflow`) whenever you actually want to ship
 what's on `main`. It needs two repository secrets (Settings → Secrets and
 variables → Actions), which you should set directly from your own machine
@@ -174,6 +177,10 @@ Both read the instance ID from `deploy/.state`, same as `provision-ec2.sh`
 and `destroy-ec2.sh` — nothing to look up or copy-paste. Since every service
 in `docker-compose.yml` runs with `restart: unless-stopped`, no manual SSH
 step is needed after starting back up.
+
+**No TLS yet:** traffic to nginx is plain HTTP. Let's Encrypt/certbot can't
+issue a cert for a bare IP, so this needs a domain pointed at the Elastic IP
+before TLS termination can be added.
 
 This is intentionally the cheapest/simplest option for a single pilot
 instance, not the most scalable one. Terraform + ECS Fargate (with the

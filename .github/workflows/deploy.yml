@@ -22,4 +22,7 @@ jobs:
             cd /opt/prosodyai
             git pull
             docker compose up -d --build
+            sudo cp deploy/nginx/prosodyai.conf /etc/nginx/sites-available/prosodyai.conf
+            sudo nginx -t
+            sudo systemctl reload nginx
           '
