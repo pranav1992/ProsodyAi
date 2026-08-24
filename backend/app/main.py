@@ -2,6 +2,7 @@ import logging
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -14,9 +15,25 @@ from app.rate_limit import limiter
 from app.routes import auth, batches
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("app")
 settings = get_settings()
 
 app = FastAPI(title="AutoAce Voice Tone & Noise Dashboard API")
+
+
+@app.middleware("http")
+async def catch_unhandled_exceptions(request: Request, call_next):
+    # A handler registered via @app.exception_handler(Exception) runs in
+    # Starlette's outermost ServerErrorMiddleware, *outside* CORSMiddleware,
+    # so its response never gets CORS headers applied -- the browser then
+    # reports a CORS error and masks the real 500. Catching here instead,
+    # inside CORSMiddleware, keeps the response on the normal response path.
+    try:
+        return await call_next(request)
+    except Exception:
+        logger.exception("unhandled exception on %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -47,6 +64,6 @@ def on_startup():
 
 
 @app.get("/health")
-@limiter.limit("20/minute")
+@limiter.limit("10/minute")
 def health(request: Request):
     return {"status": "ok"}

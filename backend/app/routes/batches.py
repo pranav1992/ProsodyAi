@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -18,6 +19,7 @@ from app.utils.csv_manifest import parse_and_validate
 
 router = APIRouter(prefix="/batches", tags=["batches"])
 settings = get_settings()
+logger = logging.getLogger("batches")
 
 RESULT_FIELDS = [
     "emotional_tone", "emotional_intensity", "background_noise_present",
@@ -29,7 +31,7 @@ UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1MB
 
 
 @router.post("", response_model=BatchDetailOut)
-@limiter.limit("5/hour;10/day")
+@limiter.limit("3/hour;10/day")
 async def upload_batch(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -59,9 +61,16 @@ async def upload_batch(
     db.commit()
     db.refresh(batch)
 
-    directory = extract_zip(zip_bytes, batch.id)
-    audio_files = list_audio_files(directory)
-    manifest_path = find_manifest(directory)
+    try:
+        directory = extract_zip(zip_bytes, batch.id)
+        audio_files = list_audio_files(directory)
+        manifest_path = find_manifest(directory)
+    except Exception:
+        logger.exception("failed to extract uploaded archive for batch %s", batch.id)
+        batch.status = "failed"
+        db.commit()
+        cleanup_batch(batch.id)
+        raise HTTPException(status_code=400, detail="Could not read the uploaded archive -- make sure it's a valid .zip file")
 
     if manifest_path is None:
         batch.status = "failed"
