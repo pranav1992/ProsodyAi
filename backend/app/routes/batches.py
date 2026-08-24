@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app.config import get_settings
 from app.database import get_db
 from app.models import AudioResult, Batch, User
 from app.rate_limit import limiter
@@ -16,6 +17,7 @@ from app.services.storage import cleanup_batch, extract_zip, find_manifest, list
 from app.utils.csv_manifest import parse_and_validate
 
 router = APIRouter(prefix="/batches", tags=["batches"])
+settings = get_settings()
 
 RESULT_FIELDS = [
     "emotional_tone", "emotional_intensity", "background_noise_present",
@@ -23,9 +25,11 @@ RESULT_FIELDS = [
     "speaker_overlap_present", "long_silence_present", "confidence",
 ]
 
+UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1MB
+
 
 @router.post("", response_model=BatchDetailOut)
-@limiter.limit("5/hour")
+@limiter.limit("5/hour;10/day")
 async def upload_batch(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -37,7 +41,18 @@ async def upload_batch(
     if not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="Upload must be a .zip archive containing audio files and a CSV manifest")
 
-    zip_bytes = await file.read()
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    chunks = []
+    total_size = 0
+    while chunk := await file.read(UPLOAD_CHUNK_SIZE):
+        total_size += len(chunk)
+        if total_size > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds the {settings.max_upload_mb}MB limit",
+            )
+        chunks.append(chunk)
+    zip_bytes = b"".join(chunks)
 
     batch = Batch(name=name or file.filename, owner_id=user.id, status="pending")
     db.add(batch)
@@ -104,7 +119,7 @@ def get_batch(request: Request, batch_id: str, db: Session = Depends(get_db), us
 
 
 @router.delete("/{batch_id}", status_code=204)
-@limiter.limit("10/minute")
+@limiter.limit("20/minute")
 def delete_batch(request: Request, batch_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     batch = db.query(Batch).filter(Batch.id == batch_id, Batch.owner_id == user.id).first()
     if batch is None:
@@ -124,7 +139,7 @@ def _result_to_dict(r: AudioResult) -> dict:
 
 
 @router.get("/{batch_id}/download")
-@limiter.limit("15/minute")
+@limiter.limit("5/minute")
 def download_results(
     request: Request,
     batch_id: str,

@@ -16,7 +16,7 @@ class Settings:
     whisper_compute_type: str = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 
     storage_dir: str = os.getenv("STORAGE_DIR", "./storage")
-    max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "500"))
+    max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "200"))
 
     admin_email: str = os.getenv("ADMIN_EMAIL", "admin@autoace.ai")
     admin_password: str = os.getenv("ADMIN_PASSWORD", "changeme123")

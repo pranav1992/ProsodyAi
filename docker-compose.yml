@@ -28,6 +28,7 @@ services:
       WHISPER_DEVICE: cpu
       WHISPER_COMPUTE_TYPE: int8
       STORAGE_DIR: /app/storage
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-200}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@autoace.ai}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme123}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
