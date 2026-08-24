@@ -5,7 +5,7 @@
 Estimates below are based on typical component-level performance
 characteristics; replace with measured numbers from `scripts/evaluate.py`
 (which prints per-file `processing_ms`) once run against real audio, and
-from the deployed Render instance under realistic load.
+from the deployed EC2 instance under realistic load.
 
 ## Per-clip pipeline breakdown (estimated)
 
@@ -13,7 +13,7 @@ from the deployed Render instance under realistic load.
 |---|---|---|
 | ffmpeg decode/resample | ~0.2–0.5s | Fixed overhead, roughly independent of audio length for short clips. |
 | Acoustic feature extraction (`librosa`/`webrtcvad`) | ~0.5–1.5s | Runs on the full waveform; scales roughly linearly with audio length but is CPU-cheap relative to transcription. |
-| Transcription (`faster-whisper`, `base`, CPU) | ~60–120s | Dominant cost. Roughly 0.3–0.7x real-time on typical Render CPU instances — i.e., a 3-minute call takes 1–2 minutes to transcribe. Update after measuring on the actual deployed instance size. |
+| Transcription (`faster-whisper`, `base`, CPU) | ~60–120s | Dominant cost. Roughly 0.3–0.7x real-time on a typical EC2 `t3.medium` CPU — i.e., a 3-minute call takes 1–2 minutes to transcribe. Update after measuring on the actual deployed instance size. |
 | Classification (`gpt-4o-mini` API call) | ~1–3s | Network round-trip + generation time for a short JSON response; largely independent of audio length. |
 | **Total per 3-minute call** | **~65–125s** | |
 

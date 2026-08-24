@@ -17,11 +17,11 @@ self-hosting the transcription step (see MEMO.md for why).
 ### 1. Transcription (`faster-whisper`, self-hosted — compute cost, not API)
 
 No per-call charge from a vendor. Cost is the marginal compute time on the
-Render instance running the backend, amortized over instance uptime cost.
+EC2 instance running the backend, amortized over instance uptime cost.
 
 Assumptions:
-- Render "standard" web service instance: ~$25/month → $0.0342/hour of
-  instance uptime.
+- EC2 `t3.medium` on-demand: ~$0.0416/hour of instance uptime (⚠️ verify
+  current on-demand rate for your region before finalizing this document).
 - `faster-whisper` `base` model on CPU processes audio at roughly 2x
   real-time (i.e., transcribing 1 minute of audio takes ~30 seconds of
   compute) — actual ratio depends on instance CPU; measure and update once
@@ -29,8 +29,8 @@ Assumptions:
 - Instance cost is shared across all processing that instance does, so this
   is a rough allocation, not a hard metered cost like a per-minute API.
 
-Estimated: $0.0342/hr ÷ 60 min/hr × 0.5 min compute per min of audio
-≈ **$0.00029 per minute of audio**.
+Estimated: $0.0416/hr ÷ 60 min/hr × 0.5 min compute per min of audio
+≈ **$0.00035 per minute of audio**.
 
 ### 2. Classification (`gpt-4o-mini`, OpenAI API — metered per token)
 
@@ -56,11 +56,11 @@ Worked example, 3-minute call:
 
 | Component | Cost per audio-minute |
 |---|---|
-| Self-hosted transcription (amortized compute) | ≈ $0.00029 |
+| Self-hosted transcription (amortized compute) | ≈ $0.00035 |
 | `gpt-4o-mini` classification call | ≈ $0.00006 |
-| **Total** | **≈ $0.00035** |
+| **Total** | **≈ $0.00041** |
 
-That's roughly **8–9x under** the $0.003/minute ceiling, leaving headroom
+That's roughly **7x under** the $0.003/minute ceiling, leaving headroom
 for: a larger/more accurate Whisper model, retry logic on transient API
 failures, or lower instance utilization than the amortization assumption
 above assumes (i.e., the instance isn't running at 100% audio-processing

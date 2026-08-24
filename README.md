@@ -37,7 +37,6 @@ scripts/     (in backend/) leave-one-call-out validation script
 deploy/               AWS EC2 pilot: provision/stop/start/destroy scripts (see below)
 .github/workflows/    GitHub Actions: manually-triggered deploy to EC2
 docker-compose.yml    local dev: postgres + backend + frontend
-render.yaml           one-shot Render deployment config
 ```
 
 ## Local development
@@ -120,22 +119,6 @@ block the rest of the batch. Batches can be deleted from the dashboard
 (with a confirmation prompt) once you're done with them — this permanently
 removes the batch and all of its results.
 
-## Deployment (Render)
-
-1. Push this repo to GitHub.
-2. In Render, create a new Blueprint from `render.yaml`.
-3. Set the `OPENAI_API_KEY`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` secrets when prompted
-   (marked `sync: false` in render.yaml so Render asks for them instead of
-   committing them to the repo).
-4. Deploy. Render builds both Dockerfiles and provisions the Postgres database
-   automatically. Update `CORS_ORIGINS` on the backend service and
-   `NEXT_PUBLIC_API_URL` build arg on the frontend once you know the final
-   `*.onrender.com` URLs (or custom domains).
-
-Whisper transcription runs on CPU by default (`WHISPER_DEVICE=cpu`,
-`WHISPER_MODEL_SIZE=base`) — no GPU instance required, which keeps hosting
-cost predictable. See LATENCY.md for measured throughput on this configuration.
-
 ## Deployment (AWS EC2 pilot)
 
 For a single-instance pilot deployment — the cheapest/simplest option, see
@@ -144,6 +127,10 @@ the whole thing: one `t3.medium` running all three containers via Docker Compose
 behind a fixed Elastic IP, with a security group that only exposes SSH to
 your current IP and the app ports (3000, 8000) to the public — the database
 is never exposed.
+
+Whisper transcription runs on CPU by default (`WHISPER_DEVICE=cpu`,
+`WHISPER_MODEL_SIZE=base`) — no GPU instance required, which keeps hosting
+cost predictable. See LATENCY.md for measured throughput on this configuration.
 
 ```bash
 # needs: AWS CLI configured (`aws configure`) with EC2 permissions,
