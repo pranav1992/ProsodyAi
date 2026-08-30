@@ -110,3 +110,16 @@ mapping below).
    gradient boosting over the acoustic + transcript-derived features) as a
    cheaper, lower-latency alternative to the LLM call, once enough labeled
    data exists to train and validate one properly.
+5. A live metrics/evaluation dashboard (accuracy trend, latency, cost
+   across runs) was considered and deliberately deferred. The brief's
+   validation/cost/latency deliverables (§6 items 6–8) are document
+   artifacts (VALIDATION.md/LATENCY.md/COST.md), not a dashboard
+   requirement, and with only 3 labeled calls there's no run-over-run trend
+   for a dashboard to usefully show — a table plus confusion matrix covers
+   it. Similarly, an experiment-tracking tool like MLflow was considered
+   for per-call latency and rejected as unnecessary overhead at this scale:
+   `scripts/evaluate.py` already times each pipeline stage directly (see
+   LATENCY.md) with no added dependency or infrastructure. Both become
+   worth building once labeled data grows past a handful of examples and
+   there's an actual trend to monitor across many runs over time — not
+   before.
