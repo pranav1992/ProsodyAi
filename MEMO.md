@@ -123,3 +123,33 @@ mapping below).
    worth building once labeled data grows past a handful of examples and
    there's an actual trend to monitor across many runs over time — not
    before.
+6. **Broader MLOps tradeoff:** most standard MLOps machinery (model
+   registry, automated retraining pipelines, feature stores, A/B/canary
+   rollout of model versions) doesn't apply here as-is, because — per
+   "Approaches considered" above — there is no trained model. The acoustic
+   layer is fixed thresholds and the LLM layer is a fixed zero-shot prompt
+   against a third-party API; nothing is fit to data, so there's nothing to
+   retrain or register in the conventional sense. What *does* have a real
+   MLOps analog, deferred for the same reason as items above (not enough
+   labeled data or production traffic yet to justify the overhead):
+   - **Versioning the things that actually change** — the acoustic
+     thresholds (`acoustic_features.py`) and the classification system
+     prompt (`classify.py`) are this system's closest equivalent to model
+     parameters. Neither is currently versioned/tagged independently of
+     the codebase's own git history; worth a lightweight changelog if
+     either gets iterated on post-pilot.
+   - **Evaluation as a CI gate** — `scripts/evaluate.py` is run manually
+     today. Once there's more labeled data, wiring it into CI to fail a
+     PR that regresses accuracy on the labeled set (vs. just running tests
+     for code correctness) is the natural next step — cheap to add, not
+     done yet because 3 examples make a regression gate noisy rather than
+     useful.
+   - **Drift from the vendor side** — `gpt-4o-mini`'s behavior isn't fully
+     under this system's control; OpenAI can update the underlying model
+     without a version bump on the pinned model name. Periodic
+     re-validation against the labeled set (or pinning to a dated model
+     snapshot if OpenAI offers one) is the mitigation, not currently
+     automated.
+   Each of these is real MLOps discipline, deliberately sized down to
+   match a 3-example, single-pilot-instance trial rather than skipped out
+   of unawareness.
