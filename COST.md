@@ -2,11 +2,11 @@
 
 **Ceiling: $0.003/minute of audio analyzed.**
 
-⚠️ The OpenAI per-token rates used below are illustrative placeholders based
-on `gpt-4o-mini`'s general pricing tier at the time this was written — verify
-the exact current rate on OpenAI's pricing page before finalizing this
-document, since API pricing changes over time and this number should not be
-submitted without a live check.
+The `gpt-4o-mini` rates below ($0.15/1M input, $0.60/1M output) were
+verified against platform.openai.com/docs/pricing on 2026-08-30 — not
+placeholders. `scripts/evaluate.py` now also measures the classification
+cost directly from real OpenAI API usage on every run (see "Measured"
+below), so this is no longer estimate-only.
 
 ## Cost components
 
@@ -52,13 +52,28 @@ Worked example, 3-minute call:
 - Cost ≈ (960 × $0.15 + 50 × $0.60) / 1,000,000 ≈ **$0.00017 total**, or
   ≈ **$0.00006 per minute of audio**.
 
+### Measured: classification cost (real run, 2026-08-30)
+
+`scripts/evaluate.py` now reads `response.usage` from the actual OpenAI API
+call and computes cost directly — no longer estimated. Run against the
+three real labeled calls (3.96 audio-minutes total):
+
+- Total: $0.000344 for 3.96 audio-minutes
+- **Per audio-minute: $0.000087** — close to the $0.00006 estimate above,
+  slightly higher (real transcripts run a bit longer than the 130wpm
+  assumption on some calls).
+
+This number is now trustworthy without caveats — it's not a projection. The
+transcription-compute figure below is still an amortized estimate, since
+that cost isn't a metered per-call charge the way the OpenAI cost is.
+
 ### Combined estimate
 
-| Component | Cost per audio-minute |
-|---|---|
-| Self-hosted transcription (amortized compute) | ≈ $0.00035 |
-| `gpt-4o-mini` classification call | ≈ $0.00006 |
-| **Total** | **≈ $0.00041** |
+| Component | Cost per audio-minute | Source |
+|---|---|---|
+| Self-hosted transcription (amortized compute) | ≈ $0.00035 | estimated (see above, still needs real EC2 utilization data) |
+| `gpt-4o-mini` classification call | **$0.000087** | measured, real API usage |
+| **Total** | **≈ $0.00044** | |
 
 That's roughly **7x under** the $0.003/minute ceiling, leaving headroom
 for: a larger/more accurate Whisper model, retry logic on transient API
@@ -83,5 +98,6 @@ duty cycle).
   in production. Under low utilization (instance idle most of the time),
   effective cost per processed minute rises; under high utilization it
   falls. Re-measure after real traffic and update this document.
-- Confirm OpenAI's current `gpt-4o-mini` pricing and, if it has moved
-  materially, redo the worked example above.
+- `gpt-4o-mini` pricing is now verified and measured directly, not
+  estimated — re-run `scripts/evaluate.py` periodically if OpenAI changes
+  pricing, since the rate is hardcoded in `app/pipeline/cost.py`.

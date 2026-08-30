@@ -22,7 +22,7 @@ def run_pipeline(audio_path: str) -> PipelineResult:
     audio, sr = load_mono_16k(audio_path)
     features = analyze(audio, sr)
     transcript = transcribe(audio, sr)
-    llm_result = classify(transcript, features)
+    llm_result, llm_usage = classify(transcript, features)
 
     prediction = PredictionResult(
         emotional_tone=llm_result["emotional_tone"],
@@ -41,5 +41,5 @@ def run_pipeline(audio_path: str) -> PipelineResult:
         prediction=prediction,
         duration_s=features.duration_s,
         processing_ms=elapsed_ms,
-        debug={"transcript": transcript, "acoustic_features": asdict(features)},
+        debug={"transcript": transcript, "acoustic_features": asdict(features), "llm_usage": llm_usage},
     )

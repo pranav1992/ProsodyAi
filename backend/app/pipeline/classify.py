@@ -71,7 +71,7 @@ def _client() -> OpenAI:
     return OpenAI(api_key=settings.openai_api_key)
 
 
-def classify(transcript: str, features: AcousticFeatures) -> dict:
+def classify(transcript: str, features: AcousticFeatures) -> tuple[dict, dict]:
     feature_summary = (
         f"duration_seconds={features.duration_s:.1f}, "
         f"background_noise_detected={features.background_noise_present}, "
@@ -97,4 +97,8 @@ def classify(transcript: str, features: AcousticFeatures) -> dict:
         },
         temperature=0,
     )
-    return json.loads(response.choices[0].message.content)
+    usage = {
+        "prompt_tokens": response.usage.prompt_tokens,
+        "completion_tokens": response.usage.completion_tokens,
+    }
+    return json.loads(response.choices[0].message.content), usage

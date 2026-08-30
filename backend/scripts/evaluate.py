@@ -19,6 +19,7 @@ from sklearn.metrics import confusion_matrix, f1_score
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.pipeline.pipeline import run_pipeline  # noqa: E402
+from app.pipeline.cost import classification_cost_usd  # noqa: E402
 from app.utils.csv_manifest import parse_and_validate  # noqa: E402
 from app.services.storage import SUPPORTED_AUDIO_EXTENSIONS  # noqa: E402
 
@@ -41,6 +42,7 @@ def main(labeled_dir: str) -> None:
         raise SystemExit(f"manifest errors: {validation.errors}")
 
     predictions, ground_truth, latencies_ms = [], [], []
+    classification_costs_usd, audio_durations_s = [], []
 
     for filename, expected_json in validation.matched.items():
         if not expected_json:
@@ -49,12 +51,18 @@ def main(labeled_dir: str) -> None:
         expected = json.loads(expected_json)
         outcome = run_pipeline(str(directory / filename))
         predicted = outcome.prediction.model_dump()
+        call_cost = classification_cost_usd(outcome.debug["llm_usage"])
 
         predictions.append(predicted)
         ground_truth.append(expected)
         latencies_ms.append(outcome.processing_ms)
+        classification_costs_usd.append(call_cost)
+        audio_durations_s.append(outcome.duration_s)
 
-        print(f"\n{filename} ({outcome.duration_s:.1f}s audio, {outcome.processing_ms}ms processing)")
+        print(
+            f"\n{filename} ({outcome.duration_s:.1f}s audio, {outcome.processing_ms}ms processing, "
+            f"${call_cost:.6f} classification cost)"
+        )
         for field in FIELDS:
             match = "OK" if predicted.get(field) == expected.get(field) else "MISMATCH"
             print(f"  {field:28s} pred={predicted.get(field)!s:20s} expected={expected.get(field)!s:20s} {match}")
@@ -78,6 +86,17 @@ def main(labeled_dir: str) -> None:
 
     print("\n=== Latency ===")
     print(f"  mean: {sum(latencies_ms) / len(latencies_ms):.0f}ms  max: {max(latencies_ms)}ms")
+
+    total_cost = sum(classification_costs_usd)
+    total_minutes = sum(audio_durations_s) / 60
+    print("\n=== Classification cost (gpt-4o-mini, measured from real API usage) ===")
+    print(f"  total: ${total_cost:.6f} over {total_minutes:.2f} audio-minutes")
+    print(f"  per audio-minute: ${total_cost / total_minutes:.6f}")
+    print(
+        "  NOTE: this covers the OpenAI classification call only. "
+        "Transcription cost is self-hosted/amortized compute, not a metered "
+        "API charge -- see COST.md for that component and the combined total."
+    )
 
 
 if __name__ == "__main__":

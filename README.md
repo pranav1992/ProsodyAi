@@ -109,8 +109,9 @@ The three labeled production calls are confidential (brief §5) and are
    ```
 
 This prints per-field accuracy, macro F1 and a confusion matrix for
-`emotional_tone`, and per-file latency — the numbers that back
-VALIDATION.md and LATENCY.md.
+`emotional_tone`, per-file latency, and measured `gpt-4o-mini`
+classification cost (from real OpenAI API usage) — the numbers that back
+VALIDATION.md, LATENCY.md, and COST.md.
 
 ## Batch upload format (dashboard)
 
