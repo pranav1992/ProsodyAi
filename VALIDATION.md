@@ -2,14 +2,13 @@
 
 ## Status
 
-This file is a template — run `backend/scripts/evaluate.py` against the
-three labeled production calls once they're available locally, then paste
-its output into the sections below before submission. Do not submit this
-document with placeholder numbers still in it.
+Run against the three real labeled production calls on 2026-08-30. Results
+below are real, not placeholders — and they surface a live accuracy
+problem (see confusion matrix) that needs investigation before submission.
 
 ```bash
 cd backend
-python scripts/evaluate.py path/to/labeled_calls_dir
+python scripts/evaluate.py eval_data/labeled_calls
 ```
 
 ## Methodology
@@ -32,32 +31,59 @@ python scripts/evaluate.py path/to/labeled_calls_dir
   have produced a wildly different outcome on the others — reported
   qualitatively below, not as a separate metric.
 
-## Per-field accuracy (fill in after running evaluate.py)
+## Per-field accuracy
 
 | Field | Accuracy | Notes |
 |---|---|---|
-| `emotional_tone` | _/3 | |
-| `emotional_intensity` | _/3 | |
-| `background_noise_present` | _/3 | |
-| `background_noise_severity` | _/3 | |
-| `audio_quality` | _/3 | |
-| `speaker_overlap_present` | _/3 | |
-| `long_silence_present` | _/3 | |
+| `emotional_tone` | 1/3 (0.33) | 0 correct if you exclude the neutral/neutral match that macro F1 still zeroes out on the other classes — see confusion matrix. |
+| `emotional_intensity` | 1/3 (0.33) | |
+| `background_noise_present` | 1/3 (0.33) | Predicted `false` on all 3; ground truth is `false, true, true` — model/thresholds are under-detecting noise. |
+| `background_noise_severity` | 1/3 (0.33) | Follows directly from `background_noise_present` being wrong on 2/3. |
+| `audio_quality` | 1/3 (0.33) | Predicted `slightly_impaired` on 2 calls the ground truth marks `clear`. |
+| `speaker_overlap_present` | 2/3 (0.67) | |
+| `long_silence_present` | 3/3 (1.00) | Only field at full accuracy. |
 
 ## emotional_tone — macro F1 and confusion matrix
 
-_Paste `evaluate.py` output here._
+Macro F1: **0.000**
+
+```
+labels: [frustrated, neutral, satisfied, upset]
+[[0 0 0 0]   frustrated (predicted 1x, always wrong)
+ [1 0 0 0]   neutral    (true label; 1 predicted as frustrated)
+ [1 0 0 0]   satisfied  (true label; 1 predicted as frustrated)
+ [1 0 0 0]]  upset      (true label; 1 predicted as neutral)
+```
+
+Predicted `neutral` for `call_002` (correct), `neutral` for `call_001`
+(true: `upset`), `frustrated` for `call_003` (true: `satisfied`). With 3
+classes and only 3 examples, macro F1 collapses to 0 the moment any class
+is missed entirely — not by itself proof the model is unusable, but the
+directional pattern (missing `upset` and `satisfied`, defaulting toward
+`neutral`/`frustrated`) is a real signal, not just small-sample noise.
 
 ## Per-call notes
 
-For each of the three calls, note here whether the acoustic thresholds
-were tuned to make that specific call pass (a sign of overfitting to worry
-about) or whether the prediction would plausibly hold under a threshold
-tuned only on the other two calls.
+1. `call_001`: predicted `neutral`/`low`, true `upset`/`high` — a large
+   miss in the exact direction the acoustic-vs-LLM split is supposed to
+   avoid (tone should come from transcript semantics, not loudness). Worth
+   inspecting the actual transcript faster-whisper produced for this call —
+   if transcription quality degraded, the LLM never had the right input.
+2. `call_002`: tone correct, but noise/severity wrong (predicted no noise,
+   true noise `TV`/medium) and intensity wrong. The acoustic SNR threshold
+   for `background_noise_present` likely doesn't generalize to a TV-type
+   noise profile — worth checking `snr_db` for this file directly.
+3. `call_003`: tone predicted `frustrated`, true `satisfied` — opposite
+   valence, not just adjacent-class noise. Also missed noise (`sharp
+   static`, medium) again. This call is the longest (172s); worth checking
+   whether transcription or classification degrades on longer audio.
 
-1. `call_001`: —
-2. `call_002`: —
-3. `call_003`: —
+**This is not yet a clean validation result** — it surfaces what looks like
+a real, fixable problem (systematic noise under-detection, tone
+misclassification skewing toward neutral/frustrated) rather than confirming
+the pipeline works. See the flagged items above before treating COST.md/
+LATENCY.md numbers derived from this run as representative of final
+accuracy.
 
 ## Known gaps in this validation
 

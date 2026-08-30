@@ -85,16 +85,32 @@ persists on disk between runs, same as the Docker path's `db_data` volume).
 
 ## Running validation against the labeled calls
 
-```bash
-cd backend
-uv run python scripts/evaluate.py path/to/labeled_calls_dir
-```
+The three labeled production calls are confidential (brief §5) and are
+**not** committed to this repo — `backend/eval_data/` is gitignored.
 
-`labeled_calls_dir` must contain the audio files plus a `labels.csv` with
-`name` and `result_json` columns (ground truth), matching the batch-upload
-format described in the brief. This prints per-field accuracy, macro F1 and
-a confusion matrix for `emotional_tone`, and per-file latency — the numbers
-that back VALIDATION.md and LATENCY.md.
+1. Download the labeled calls + `labels.csv` from the source provided by
+   AutoAce (e.g. the shared Drive folder) to a local folder.
+2. Unzip if needed — `evaluate.py` reads loose files from a directory, not
+   a zip (the zip format is only for the dashboard's `/batches` upload).
+3. Place the audio files and `labels.csv` directly (unzipped, no
+   subfolders) into `backend/eval_data/labeled_calls/`, e.g.:
+   ```bash
+   mkdir -p backend/eval_data/labeled_calls
+   mv ~/Downloads/call_*.ogg ~/Downloads/labels.csv backend/eval_data/labeled_calls/
+   ```
+   Watch for a browser download renaming the manifest to `labels (1).csv`
+   or similar — it must be named exactly `labels.csv` for the script to
+   find it (`directory.glob("*.csv")` picks up whatever CSV is there, so
+   make sure there's only one).
+4. Run the script:
+   ```bash
+   cd backend
+   uv run python scripts/evaluate.py eval_data/labeled_calls
+   ```
+
+This prints per-field accuracy, macro F1 and a confusion matrix for
+`emotional_tone`, and per-file latency — the numbers that back
+VALIDATION.md and LATENCY.md.
 
 ## Batch upload format (dashboard)
 

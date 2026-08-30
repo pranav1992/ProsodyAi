@@ -19,6 +19,9 @@ backend/.env
 .ipynb_checkpoints/
 backend/notebooks/_synthetic_calls/
 
+# real production call audio -- confidential, never committed (brief §5)
+backend/eval_data/
+
 # Node / Next.js
 frontend/node_modules/
 frontend/.next/

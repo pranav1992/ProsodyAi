@@ -2,10 +2,26 @@
 
 ## Status
 
-Estimates below are based on typical component-level performance
-characteristics; replace with measured numbers from `scripts/evaluate.py`
-(which prints per-file `processing_ms`) once run against real audio, and
-from the deployed EC2 instance under realistic load.
+Measured against the three real labeled production calls on 2026-08-30
+(local dev machine, not the deployed EC2 instance — see caveat below).
+Estimates in the table below are kept for the stage-by-stage breakdown
+context, but the measured totals replace the estimated total.
+
+## Measured per-clip latency (real calls, local run)
+
+| Call | Audio duration | Processing time |
+|---|---|---|
+| `call_001.ogg` | 30.9s | 6,966ms |
+| `call_002.ogg` | 35.0s | 6,958ms |
+| `call_003.ogg` | 171.9s | 10,358ms |
+| **Mean / max** | | **8,094ms mean / 10,358ms max** |
+
+Notably faster than the original CPU-transcription estimate below (which
+assumed 0.3–0.7x real-time on a `t3.medium`) — this run was on a local dev
+machine, not the actual `t3.medium` EC2 instance, so these numbers likely
+**understate** production latency. Re-run `scripts/evaluate.py` on the
+deployed instance (or via SSH) before finalizing this document, since the
+brief scores latency on production-realistic numbers, not dev-machine ones.
 
 ## Per-clip pipeline breakdown (estimated)
 
