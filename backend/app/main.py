@@ -1,4 +1,5 @@
 import logging
+import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,29 +11,36 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.auth import hash_password
 from app.config import get_settings
 from app.database import Base, SessionLocal, engine
+from app.logging_config import configure_logging
 from app.models import User
 from app.rate_limit import limiter
 from app.routes import auth, batches
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("app")
 settings = get_settings()
+configure_logging(settings.log_level)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AutoAce Voice Tone & Noise Dashboard API")
 
 
 @app.middleware("http")
-async def catch_unhandled_exceptions(request: Request, call_next):
+async def log_requests(request: Request, call_next):
     # A handler registered via @app.exception_handler(Exception) runs in
     # Starlette's outermost ServerErrorMiddleware, *outside* CORSMiddleware,
     # so its response never gets CORS headers applied -- the browser then
     # reports a CORS error and masks the real 500. Catching here instead,
     # inside CORSMiddleware, keeps the response on the normal response path.
+    start = time.monotonic()
     try:
-        return await call_next(request)
+        response = await call_next(request)
     except Exception:
-        logger.exception("unhandled exception on %s %s", request.method, request.url.path)
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        logger.exception("%s %s failed after %dms", request.method, request.url.path, elapsed_ms)
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+    elapsed_ms = int((time.monotonic() - start) * 1000)
+    logger.info("%s %s %d %dms", request.method, request.url.path, response.status_code, elapsed_ms)
+    return response
 
 
 app.state.limiter = limiter

@@ -1,7 +1,14 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-autoace}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autoace}
@@ -17,6 +24,7 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "127.0.0.1:8000:8000"
     environment:
@@ -44,6 +52,7 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

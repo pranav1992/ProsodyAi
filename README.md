@@ -189,6 +189,31 @@ in-process `BackgroundTasks`) would be worth the extra setup once there's a
 second environment to keep in sync or a need to scale transcription
 horizontally.
 
+## Logging
+
+The backend logs to stdout only (`app/logging_config.py`) — no file handler,
+by design: containers are stateless, so a log file written inside one would
+be lost on every restart/redeploy anyway. This follows the standard
+12-factor approach of letting the runtime environment own log
+storage/routing rather than the app.
+
+- **Levels:** standard Python `logging` levels, `INFO` by default
+  (`LOG_LEVEL` env var). `INFO` covers request lines (method/path/status/
+  latency) and batch lifecycle (queued/started/per-file/completed);
+  `WARNING` covers failed login attempts; `ERROR`/`exception` covers
+  unhandled request errors and per-file/per-batch pipeline failures.
+- **Where it lands:**
+  - Local (`uvicorn`/`pytest`) — printed to the terminal only.
+  - Docker (`docker compose up`) — captured by Docker's log driver;
+    view with `docker compose logs -f backend`.
+  - EC2 pilot — same Docker capture, written to `json-file` on the host
+    (`/var/lib/docker/containers/<id>/*-json.log`).
+- **Rotation:** `docker-compose.yml` caps each service's `json-file` log at
+  10MB × 5 files (50MB max, oldest dropped first), so logs on the EC2
+  instance can no longer grow unbounded. Shipping logs off-box (e.g.
+  CloudWatch Logs) is a further step worth doing once someone needs to
+  debug without SSH access.
+
 ## Known limitations / next steps
 
 See MEMO.md § Failure modes and next steps.

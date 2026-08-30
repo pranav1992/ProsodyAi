@@ -19,7 +19,7 @@ from app.utils.csv_manifest import parse_and_validate
 
 router = APIRouter(prefix="/batches", tags=["batches"])
 settings = get_settings()
-logger = logging.getLogger("batches")
+logger = logging.getLogger(__name__)
 
 RESULT_FIELDS = [
     "emotional_tone", "emotional_intensity", "background_noise_present",
@@ -107,6 +107,7 @@ async def upload_batch(
     db.refresh(batch)
 
     background_tasks.add_task(process_batch, batch.id)
+    logger.info("batch %s queued: %d files, owner %s", batch.id, batch.total_files, user.id)
 
     out = BatchDetailOut.model_validate(batch)
     return out

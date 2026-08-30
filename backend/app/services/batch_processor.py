@@ -9,7 +9,7 @@ from app.models import AudioResult, Batch
 from app.pipeline.pipeline import run_pipeline
 from app.services.storage import batch_dir, cleanup_batch
 
-logger = logging.getLogger("batch_processor")
+logger = logging.getLogger(__name__)
 
 
 def process_batch(batch_id: str) -> None:
@@ -23,6 +23,7 @@ def process_batch(batch_id: str) -> None:
         try:
             batch.status = "processing"
             db.commit()
+            logger.info("batch %s started: %d files", batch_id, batch.total_files)
 
             directory = batch_dir(batch_id)
             results = db.query(AudioResult).filter(AudioResult.batch_id == batch_id).all()
@@ -48,6 +49,9 @@ def process_batch(batch_id: str) -> None:
                     result.processing_ms = outcome.processing_ms
                     result.audio_duration_seconds = outcome.duration_s
                     batch.processed_files += 1
+                    logger.info(
+                        "batch %s: processed %s in %dms", batch_id, result.filename, outcome.processing_ms
+                    )
                 except Exception as exc:  # noqa: BLE001 -- one bad file must not fail the batch
                     logger.exception("failed to process %s in batch %s", result.filename, batch_id)
                     result.status = "error"
@@ -59,6 +63,10 @@ def process_batch(batch_id: str) -> None:
             batch.status = "completed"
             batch.completed_at = datetime.now(timezone.utc)
             db.commit()
+            logger.info(
+                "batch %s completed: %d processed, %d failed",
+                batch_id, batch.processed_files, batch.failed_files,
+            )
         except Exception:  # noqa: BLE001 -- a batch must never be left stuck in "processing"
             logger.exception("batch %s failed outside per-file processing", batch_id)
             batch.status = "failed"
