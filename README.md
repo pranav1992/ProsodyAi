@@ -200,11 +200,35 @@ issue a cert for a bare IP, so this needs a domain pointed at the Elastic IP
 before TLS termination can be added.
 
 This is intentionally the cheapest/simplest option for a single pilot
-instance, not the most scalable one. Terraform + ECS Fargate (with the
-Whisper processing split into its own worker/queue instead of the current
-in-process `BackgroundTasks`) would be worth the extra setup once there's a
-second environment to keep in sync or a need to scale transcription
-horizontally.
+instance, not the most scalable one — see the scaling plan below for what
+changes and when.
+
+## Scaling plan
+
+The current architecture is deliberately sized for a single pilot: one
+EC2 instance, in-process background tasks, local disk storage. None of
+that is wrong for a pilot, but none of it scales past one instance either.
+This is staged by what actually becomes the bottleneck first, not a
+rewrite-everything plan — per LATENCY.md, transcription is ~85% of
+processing time, so that's the first thing to scale, not the API tier.
+
+| Trigger | What's scaled | Change |
+|---|---|---|
+| Batch concurrency exceeds what one worker process should hold in memory | Audio processing | Move off in-process `BackgroundTasks` onto a real queue (Celery/RQ + Redis, or SQS) with a separate worker pool, so multiple `faster-whisper` inferences run in parallel instead of one file at a time sequentially (see MEMO.md next steps #3). |
+| Worker pool needs to grow/shrink with queue depth | Transcription throughput | Autoscaling worker pool (ECS Fargate or an EC2 ASG) instead of a fixed instance — scales roughly linearly with worker count since transcription is CPU-bound and embarrassingly parallel across files. |
+| API/dashboard traffic outgrows one instance, or the single EC2 instance becomes a reliability concern | Request-serving tier | FastAPI + Next.js containers are already stateless — put them behind a load balancer, run 2+ replicas. No code change needed; this is the cheapest scaling step since nothing here holds session state locally. |
+| Storage becomes a single point of failure, or multiple app/worker instances need to share uploaded audio | Audio storage | Swap `STORAGE_DIR` (local Docker volume, single-instance-only) for S3 + presigned URLs. Also removes the current constraint that only one instance can ever see uploaded files. |
+| Uptime/backup guarantees matter beyond a pilot | Database | Self-hosted Postgres container → managed RDS (multi-AZ), for automated backups/failover instead of a container restart being the only recovery path. |
+| A second environment (staging) needs to stay in sync with prod | Infra-as-code | Terraform instead of the current shell-script provisioning (`deploy/provision-ec2.sh`), which is fine for one hand-run environment but doesn't scale to keeping N environments consistent. |
+
+**Cost implication:** every row above adds infrastructure cost, which
+pushes back against the $0.003/minute ceiling (COST.md) — the current
+~7x headroom absorbs some of this, but scaling decisions should be
+re-checked against COST.md's ceiling as they're made, not assumed to stay
+under budget. GPU-backed transcription in particular would be a much
+bigger cost jump than horizontally scaling CPU workers, so exhaust the
+CPU-worker-pool option first if latency at scale becomes the binding
+constraint.
 
 ## Logging
 
