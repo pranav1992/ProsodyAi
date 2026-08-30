@@ -42,7 +42,7 @@ def main(labeled_dir: str) -> None:
         raise SystemExit(f"manifest errors: {validation.errors}")
 
     predictions, ground_truth, latencies_ms = [], [], []
-    classification_costs_usd, audio_durations_s = [], []
+    classification_costs_usd, audio_durations_s, stage_ms_per_call = [], [], []
 
     for filename, expected_json in validation.matched.items():
         if not expected_json:
@@ -63,6 +63,10 @@ def main(labeled_dir: str) -> None:
             f"\n{filename} ({outcome.duration_s:.1f}s audio, {outcome.processing_ms}ms processing, "
             f"${call_cost:.6f} classification cost)"
         )
+        stage_ms = outcome.debug["stage_ms"]
+        stage_ms_per_call.append(stage_ms)
+        stage_line = "  ".join(f"{stage}={ms}ms" for stage, ms in stage_ms.items())
+        print(f"  stages: {stage_line}")
         for field in FIELDS:
             match = "OK" if predicted.get(field) == expected.get(field) else "MISMATCH"
             print(f"  {field:28s} pred={predicted.get(field)!s:20s} expected={expected.get(field)!s:20s} {match}")
@@ -86,6 +90,11 @@ def main(labeled_dir: str) -> None:
 
     print("\n=== Latency ===")
     print(f"  mean: {sum(latencies_ms) / len(latencies_ms):.0f}ms  max: {max(latencies_ms)}ms")
+
+    print("\n=== Latency by stage (mean across calls) ===")
+    for stage in stage_ms_per_call[0]:
+        values = [s[stage] for s in stage_ms_per_call]
+        print(f"  {stage:20s} mean={sum(values) / len(values):.0f}ms  max={max(values)}ms")
 
     total_cost = sum(classification_costs_usd)
     total_minutes = sum(audio_durations_s) / 60

@@ -23,15 +23,25 @@ machine, not the actual `t3.medium` EC2 instance, so these numbers likely
 deployed instance (or via SSH) before finalizing this document, since the
 brief scores latency on production-realistic numbers, not dev-machine ones.
 
-## Per-clip pipeline breakdown (estimated)
+## Per-clip pipeline breakdown (measured, real calls, local run)
 
-| Stage | Estimated time (3-minute call) | Notes |
-|---|---|---|
-| ffmpeg decode/resample | ~0.2–0.5s | Fixed overhead, roughly independent of audio length for short clips. |
-| Acoustic feature extraction (`librosa`/`webrtcvad`) | ~0.5–1.5s | Runs on the full waveform; scales roughly linearly with audio length but is CPU-cheap relative to transcription. |
-| Transcription (`faster-whisper`, `base`, CPU) | ~60–120s | Dominant cost. Roughly 0.3–0.7x real-time on a typical EC2 `t3.medium` CPU — i.e., a 3-minute call takes 1–2 minutes to transcribe. Update after measuring on the actual deployed instance size. |
-| Classification (`gpt-4o-mini` API call) | ~1–3s | Network round-trip + generation time for a short JSON response; largely independent of audio length. |
-| **Total per 3-minute call** | **~65–125s** | |
+`scripts/evaluate.py` now times each pipeline stage individually
+(`app/pipeline/pipeline.py`'s `stage_ms`), so this is measured, not
+estimated:
+
+| Stage | Mean | Max | Notes |
+|---|---|---|---|
+| Audio decode (ffmpeg/librosa load) | 191ms | 394ms | Fixed overhead, roughly independent of audio length for these clip sizes. |
+| Acoustic feature extraction (`librosa`/`webrtcvad`) | 343ms | 852ms | CPU-cheap relative to transcription, as expected. |
+| Transcription (`faster-whisper`, `base`, CPU) | 5,664ms | 8,109ms | Dominant cost, confirmed — ~85% of total processing time across the 3 calls. |
+| Classification (`gpt-4o-mini` API call) | 1,231ms | 1,374ms | Network round-trip + generation; far below the old 1–3s estimate's upper bound. |
+| **Total (measured, per call)** | **7,746ms** | **10,167ms** | See per-call table above. |
+
+These numbers are **local-dev-machine**, not the deployed `t3.medium` —
+they're faster than the original CPU-transcription estimate (which assumed
+0.3–0.7x real-time on `t3.medium`), so treat this table as a lower bound.
+Re-run `scripts/evaluate.py` on the EC2 instance to get production-realistic
+numbers before finalizing.
 
 Transcription dominates because it's the only step that isn't trivially
 fast, which is the direct tradeoff for avoiding a per-minute hosted ASR API
@@ -60,7 +70,9 @@ CPU-bound, embarrassingly-parallel batch workload like this one.
 ```bash
 cd backend
 python scripts/evaluate.py path/to/labeled_calls_dir
-# prints per-file duration_s and processing_ms, plus mean/max across the set
+# prints per-file duration_s, processing_ms, and a per-stage breakdown
+# (audio_decode / acoustic_features / transcription / classification),
+# plus mean/max across the set for both the total and each stage
 ```
 
 For end-to-end dashboard latency (including upload, batch orchestration,

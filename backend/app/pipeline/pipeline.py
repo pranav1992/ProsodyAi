@@ -18,11 +18,23 @@ class PipelineResult:
 
 def run_pipeline(audio_path: str) -> PipelineResult:
     start = time.monotonic()
+    stage_ms = {}
 
+    t = time.monotonic()
     audio, sr = load_mono_16k(audio_path)
+    stage_ms["audio_decode"] = int((time.monotonic() - t) * 1000)
+
+    t = time.monotonic()
     features = analyze(audio, sr)
+    stage_ms["acoustic_features"] = int((time.monotonic() - t) * 1000)
+
+    t = time.monotonic()
     transcript = transcribe(audio, sr)
+    stage_ms["transcription"] = int((time.monotonic() - t) * 1000)
+
+    t = time.monotonic()
     llm_result, llm_usage = classify(transcript, features)
+    stage_ms["classification"] = int((time.monotonic() - t) * 1000)
 
     prediction = PredictionResult(
         emotional_tone=llm_result["emotional_tone"],
@@ -41,5 +53,10 @@ def run_pipeline(audio_path: str) -> PipelineResult:
         prediction=prediction,
         duration_s=features.duration_s,
         processing_ms=elapsed_ms,
-        debug={"transcript": transcript, "acoustic_features": asdict(features), "llm_usage": llm_usage},
+        debug={
+            "transcript": transcript,
+            "acoustic_features": asdict(features),
+            "llm_usage": llm_usage,
+            "stage_ms": stage_ms,
+        },
     )
