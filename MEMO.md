@@ -94,6 +94,20 @@ mapping below).
   attributed to a specific speaker. If a future version needs to
   distinguish agent vs. customer tone specifically, that requires speaker
   labels the current pipeline doesn't produce.
+- **OpenAI account/service failure (handled).** If the OpenAI API key is
+  invalid or the account runs out of billing credit, `classify()`
+  (`app/pipeline/classify.py`) now catches this specifically instead of
+  letting the raw SDK exception surface: transient rate-limiting gets
+  retried with backoff, while quota exhaustion or an auth failure raises a
+  typed `ClassificationServiceError` with a clean, non-technical message.
+  `batch_processor.py` treats this as a systemic failure, not a per-file
+  one — it stops processing the rest of the batch immediately (instead of
+  wasting `faster-whisper` transcription time on files guaranteed to fail
+  the same way) and marks the batch `failed` rather than `completed`, so
+  the dashboard shows an honest top-level status instead of N identical
+  cryptic per-file errors. Before this, every file would silently burn
+  full transcription time before showing a raw `Error code: 429 -
+  {'error': {...}}` string per row.
 
 ## Next steps with more time/data
 

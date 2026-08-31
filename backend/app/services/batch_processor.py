@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import AudioResult, Batch
+from app.pipeline.errors import ClassificationServiceError
 from app.pipeline.pipeline import run_pipeline
 from app.services.storage import batch_dir, cleanup_batch
 
@@ -27,6 +28,7 @@ def process_batch(batch_id: str) -> None:
 
             directory = batch_dir(batch_id)
             results = db.query(AudioResult).filter(AudioResult.batch_id == batch_id).all()
+            service_failure: str | None = None
 
             for result in results:
                 result.status = "processing"
@@ -52,6 +54,22 @@ def process_batch(batch_id: str) -> None:
                     logger.info(
                         "batch %s: processed %s in %dms", batch_id, result.filename, outcome.processing_ms
                     )
+                except ClassificationServiceError as exc:
+                    # Not a per-file problem -- the classification service itself
+                    # is unavailable (quota exhausted, bad API key, OpenAI outage).
+                    # Every remaining file would fail transcription for nothing, so
+                    # stop here instead of grinding through the rest of the batch.
+                    logger.error(
+                        "batch %s: classification service failure on %s, aborting "
+                        "remaining files: %s",
+                        batch_id, result.filename, exc.user_message,
+                    )
+                    result.status = "error"
+                    result.error_message = exc.user_message
+                    batch.failed_files += 1
+                    service_failure = exc.user_message
+                    db.commit()
+                    break
                 except Exception as exc:  # noqa: BLE001 -- one bad file must not fail the batch
                     logger.exception("failed to process %s in batch %s", result.filename, batch_id)
                     result.status = "error"
@@ -60,12 +78,20 @@ def process_batch(batch_id: str) -> None:
 
                 db.commit()
 
-            batch.status = "completed"
+            if service_failure:
+                for r in results:
+                    if r.status == "pending":
+                        r.status = "error"
+                        r.error_message = service_failure
+                        batch.failed_files += 1
+                batch.status = "failed"
+            else:
+                batch.status = "completed"
             batch.completed_at = datetime.now(timezone.utc)
             db.commit()
             logger.info(
-                "batch %s completed: %d processed, %d failed",
-                batch_id, batch.processed_files, batch.failed_files,
+                "batch %s %s: %d processed, %d failed",
+                batch_id, batch.status, batch.processed_files, batch.failed_files,
             )
         except Exception:  # noqa: BLE001 -- a batch must never be left stuck in "processing"
             logger.exception("batch %s failed outside per-file processing", batch_id)

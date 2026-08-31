@@ -1,6 +1,7 @@
 from app.auth import hash_password
 from app.database import SessionLocal
 from app.models import AudioResult, Batch, User
+from app.pipeline.errors import ClassificationServiceError
 from app.pipeline.pipeline import PipelineResult
 from app.schemas import (
     AudioQuality,
@@ -112,3 +113,37 @@ def test_process_batch_marks_batch_failed_on_error_outside_per_file_loop(client,
 def test_process_batch_handles_missing_batch_gracefully(client):
     # must not raise even if the batch row doesn't exist
     process_batch("does-not-exist")
+
+
+def test_process_batch_aborts_remaining_files_on_classification_service_error(client, monkeypatch):
+    call_count = 0
+
+    def _quota_exhausted(audio_path):
+        nonlocal call_count
+        call_count += 1
+        raise ClassificationServiceError("OpenAI account has run out of credits.")
+
+    monkeypatch.setattr("app.services.batch_processor.run_pipeline", _quota_exhausted)
+    batch_id = _seed_batch(num_files=3)
+
+    process_batch(batch_id)
+
+    # fail-fast: run_pipeline (which transcribes before classifying) should
+    # only run once, not once per file -- the whole point is not to burn
+    # compute on files guaranteed to fail the same way.
+    assert call_count == 1
+
+    batch = _get_batch(batch_id)
+    assert batch.status == "failed"  # systemic failure, not per-file
+    assert batch.processed_files == 0
+    assert batch.failed_files == 3
+
+    db = SessionLocal()
+    try:
+        results = db.query(AudioResult).filter(AudioResult.batch_id == batch_id).all()
+        assert len(results) == 3
+        for result in results:
+            assert result.status == "error"
+            assert result.error_message == "OpenAI account has run out of credits."
+    finally:
+        db.close()

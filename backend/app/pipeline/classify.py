@@ -13,13 +13,24 @@ Only the transcript and a small numeric feature summary are sent to OpenAI --
 never the raw audio -- per the data-handling constraint in the brief.
 """
 import json
+import time
 
-from openai import OpenAI
+from openai import APIError, AuthenticationError, OpenAI, RateLimitError
 
 from app.config import get_settings
 from app.pipeline.acoustic_features import AcousticFeatures
+from app.pipeline.errors import ClassificationServiceError
 
 settings = get_settings()
+
+# Rate-limit errors are ambiguous by exception type alone -- OpenAI raises
+# the same RateLimitError class for "too many requests per minute, retry
+# shortly" and "account is out of credits, retrying will never help". Only
+# the `code` field on the exception (mirrors the API response body)
+# distinguishes them.
+_QUOTA_EXHAUSTED_CODE = "insufficient_quota"
+_MAX_RETRIES = 2
+_RETRY_DELAY_S = 5
 
 SCHEMA = {
     "type": "object",
@@ -71,6 +82,53 @@ def _client() -> OpenAI:
     return OpenAI(api_key=settings.openai_api_key)
 
 
+def _create_completion(user_content: str):
+    kwargs = dict(
+        model=settings.classification_model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": {"name": "call_classification", "schema": SCHEMA, "strict": True},
+        },
+        temperature=0,
+    )
+
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            return _client().chat.completions.create(**kwargs)
+        except AuthenticationError as exc:
+            raise ClassificationServiceError(
+                "Classification service is misconfigured (invalid OpenAI API key). "
+                "Contact your administrator."
+            ) from exc
+        except RateLimitError as exc:
+            if exc.code == _QUOTA_EXHAUSTED_CODE:
+                raise ClassificationServiceError(
+                    "Classification service is unavailable: the OpenAI account has "
+                    "run out of credits. Contact your administrator to add billing "
+                    "credit, then re-run this batch."
+                ) from exc
+            if attempt < _MAX_RETRIES:
+                time.sleep(_RETRY_DELAY_S)
+                continue
+            raise ClassificationServiceError(
+                "Classification service is rate-limited and retries were "
+                "exhausted. Try again in a few minutes."
+            ) from exc
+        except APIError as exc:
+            # Connection errors, 5xx from OpenAI, etc -- not specific to this
+            # file either, but worth one retry since these are often transient.
+            if attempt < _MAX_RETRIES:
+                time.sleep(_RETRY_DELAY_S)
+                continue
+            raise ClassificationServiceError(
+                f"Classification service error: {exc.message}"
+            ) from exc
+
+
 def classify(transcript: str, features: AcousticFeatures) -> tuple[dict, dict]:
     feature_summary = (
         f"duration_seconds={features.duration_s:.1f}, "
@@ -85,18 +143,7 @@ def classify(transcript: str, features: AcousticFeatures) -> tuple[dict, dict]:
         f"Transcript:\n{transcript or '[no speech detected / empty transcript]'}"
     )
 
-    response = _client().chat.completions.create(
-        model=settings.classification_model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
-        response_format={
-            "type": "json_schema",
-            "json_schema": {"name": "call_classification", "schema": SCHEMA, "strict": True},
-        },
-        temperature=0,
-    )
+    response = _create_completion(user_content)
     usage = {
         "prompt_tokens": response.usage.prompt_tokens,
         "completion_tokens": response.usage.completion_tokens,
