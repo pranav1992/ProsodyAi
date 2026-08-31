@@ -47,7 +47,7 @@ _upload_semaphore = asyncio.Semaphore(settings.max_concurrent_uploads)
 
 
 @router.post("", response_model=BatchDetailOut)
-@limiter.limit("3/hour;10/day")
+@limiter.limit("10/hour;100/day")
 async def upload_batch(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -155,7 +155,7 @@ def get_batch(request: Request, batch_id: str, db: Session = Depends(get_db), us
 
 
 @router.delete("/{batch_id}", status_code=204)
-@limiter.limit("20/minute")
+@limiter.limit("60/minute")
 def delete_batch(request: Request, batch_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     batch = db.query(Batch).filter(Batch.id == batch_id, Batch.owner_id == user.id).first()
     if batch is None:
@@ -175,7 +175,7 @@ def _result_to_dict(r: AudioResult) -> dict:
 
 
 @router.get("/{batch_id}/download")
-@limiter.limit("5/minute")
+@limiter.limit("20/minute;50/hour")
 def download_results(
     request: Request,
     batch_id: str,
