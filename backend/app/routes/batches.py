@@ -47,7 +47,7 @@ _upload_semaphore = asyncio.Semaphore(settings.max_concurrent_uploads)
 
 
 @router.post("", response_model=BatchDetailOut)
-@limiter.limit("10/hour;100/day")
+@limiter.limit("20/hour;50/day")
 async def upload_batch(
     request: Request,
     background_tasks: BackgroundTasks,
