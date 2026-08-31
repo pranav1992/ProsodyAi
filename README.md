@@ -53,8 +53,11 @@ docker compose up --build
 
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:8000
-- Login with `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `backend/.env` (defaults:
-  `admin@autoace.ai` / `changeme123` — **change these before deploying**).
+- Login with the `ADMIN_EMAIL` / `ADMIN_PASSWORD` values set in `backend/.env`.
+  Local-dev-only defaults live in `app/config.py` if you don't set them —
+  **do not rely on those defaults beyond local dev; set real values in
+  `.env` before deploying** (the EC2 pilot path already generates random
+  ones automatically, see Deployment below).
 
 To stop: `Ctrl+C` if running in the foreground, or `docker compose down` from
 another terminal. Either way the `db_data` and `backend_storage` named
