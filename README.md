@@ -215,9 +215,24 @@ This is staged by what actually becomes the bottleneck first, not a
 rewrite-everything plan — per LATENCY.md, transcription is ~85% of
 processing time, so that's the first thing to scale, not the API tier.
 
+**Baseline concurrency safety (already in place, not deferred):** on a
+`t3.medium` (2 vCPU, 4GB RAM), uploads used to be buffered fully into
+memory before touching disk and batch processing had no concurrency
+limit — a handful of large uploads or several batches landing at once
+could OOM the instance or thrash the 2 vCPUs against each other. Both are
+fixed now: `save_upload_stream()` (`app/services/storage.py`) writes
+uploads to disk one chunk at a time regardless of size, and
+`process_batch()` (`app/services/batch_processor.py`) is capped by a
+`threading.Semaphore(MAX_CONCURRENT_BATCHES)` (default 2, configurable via
+env var) — batches beyond the cap simply wait in `"pending"` for a slot,
+which the dashboard already renders correctly. This is a real ceiling, not
+just a rate limit: the per-IP upload rate limit (3/hour) doesn't protect
+against many *different* users uploading around the same time, but the
+semaphore does, regardless of how many users trigger it.
+
 | Trigger | What's scaled | Change |
 |---|---|---|
-| Batch concurrency exceeds what one worker process should hold in memory | Audio processing | Move off in-process `BackgroundTasks` onto a real queue (Celery/RQ + Redis, or SQS) with a separate worker pool, so multiple `faster-whisper` inferences run in parallel instead of one file at a time sequentially (see MEMO.md next steps #3). |
+| Batch concurrency exceeds what `MAX_CONCURRENT_BATCHES` and one worker process should hold | Audio processing | Move off in-process `BackgroundTasks` onto a real queue (Celery/RQ + Redis, or SQS) with a separate worker pool, so multiple `faster-whisper` inferences run in parallel instead of being capped to a small fixed number on one instance (see MEMO.md next steps #3). |
 | Worker pool needs to grow/shrink with queue depth | Transcription throughput | Autoscaling worker pool (ECS Fargate or an EC2 ASG) instead of a fixed instance — scales roughly linearly with worker count since transcription is CPU-bound and embarrassingly parallel across files. |
 | API/dashboard traffic outgrows one instance, or the single EC2 instance becomes a reliability concern | Request-serving tier | FastAPI + Next.js containers are already stateless — put them behind a load balancer, run 2+ replicas. No code change needed; this is the cheapest scaling step since nothing here holds session state locally. |
 | Storage becomes a single point of failure, or multiple app/worker instances need to share uploaded audio | Audio storage | Swap `STORAGE_DIR` (local Docker volume, single-instance-only) for S3 + presigned URLs. Also removes the current constraint that only one instance can ever see uploaded files. |

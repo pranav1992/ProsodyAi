@@ -108,6 +108,20 @@ mapping below).
   cryptic per-file errors. Before this, every file would silently burn
   full transcription time before showing a raw `Error code: 429 -
   {'error': {...}}` string per row.
+- **Concurrent-upload/processing safety on a memory-constrained pilot
+  instance (handled).** A `t3.medium` has 4GB RAM and 2 vCPUs shared across
+  Postgres, the frontend, and the backend. Uploads were previously buffered
+  fully into memory before being written to disk, and batch processing had
+  no concurrency limit — several large uploads or batches landing around
+  the same time could OOM the instance or thrash the 2 vCPUs against each
+  other, and the per-IP upload rate limit doesn't protect against this
+  since it doesn't coordinate across different users. `save_upload_stream()`
+  now writes uploads to disk incrementally regardless of size, and
+  `process_batch()` is capped by a `threading.Semaphore` (default 2
+  concurrent batches, `MAX_CONCURRENT_BATCHES` env var) — extra batches
+  wait in `"pending"` for a slot rather than all running at once. See
+  README's Scaling plan for the baseline-safety note and what's still
+  deferred (a real worker queue) versus what's already fixed.
 
 ## Next steps with more time/data
 

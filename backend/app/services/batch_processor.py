@@ -1,9 +1,11 @@
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import SessionLocal
 from app.models import AudioResult, Batch
 from app.pipeline.errors import ClassificationServiceError
@@ -11,9 +13,24 @@ from app.pipeline.pipeline import run_pipeline
 from app.services.storage import batch_dir, cleanup_batch
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
+
+# Batches run on a background thread (FastAPI BackgroundTasks -> anyio
+# threadpool), not the asyncio event loop, so this needs a real
+# threading.Semaphore -- an asyncio.Semaphore wouldn't coordinate across
+# worker threads correctly. Caps concurrent CPU-bound transcription jobs
+# to what the instance can actually run without thrashing (see README's
+# Scaling plan); batches beyond the cap simply wait in "pending" for a
+# slot, which the dashboard already renders correctly.
+_processing_semaphore = threading.Semaphore(settings.max_concurrent_batches)
 
 
 def process_batch(batch_id: str) -> None:
+    with _processing_semaphore:
+        _process_batch_locked(batch_id)
+
+
+def _process_batch_locked(batch_id: str) -> None:
     db: Session = SessionLocal()
     try:
         batch = db.query(Batch).filter(Batch.id == batch_id).first()

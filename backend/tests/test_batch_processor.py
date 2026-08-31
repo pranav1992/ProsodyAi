@@ -1,3 +1,8 @@
+import threading
+import time
+from uuid import uuid4
+
+import app.services.batch_processor as batch_processor_module
 from app.auth import hash_password
 from app.database import SessionLocal
 from app.models import AudioResult, Batch, User
@@ -31,7 +36,7 @@ def _fake_pipeline_result() -> PipelineResult:
 def _seed_batch(num_files: int = 1) -> str:
     db = SessionLocal()
     try:
-        user = User(email="pipeline-test@example.com", hashed_password=hash_password("x"))
+        user = User(email=f"pipeline-test-{uuid4()}@example.com", hashed_password=hash_password("x"))
         db.add(user)
         db.commit()
         db.refresh(user)
@@ -147,3 +152,40 @@ def test_process_batch_aborts_remaining_files_on_classification_service_error(cl
             assert result.error_message == "OpenAI account has run out of credits."
     finally:
         db.close()
+
+
+def test_process_batch_caps_concurrent_processing(client, monkeypatch):
+    # Force the cap down to 1 for a deterministic test, regardless of the
+    # configured MAX_CONCURRENT_BATCHES default.
+    monkeypatch.setattr(batch_processor_module, "_processing_semaphore", threading.Semaphore(1))
+
+    concurrent = 0
+    max_observed_concurrent = 0
+    lock = threading.Lock()
+
+    def _slow_pipeline(audio_path):
+        nonlocal concurrent, max_observed_concurrent
+        with lock:
+            concurrent += 1
+            max_observed_concurrent = max(max_observed_concurrent, concurrent)
+        time.sleep(0.2)
+        with lock:
+            concurrent -= 1
+        return _fake_pipeline_result()
+
+    monkeypatch.setattr(batch_processor_module, "run_pipeline", _slow_pipeline)
+
+    batch_id_1 = _seed_batch(num_files=1)
+    batch_id_2 = _seed_batch(num_files=1)
+
+    t1 = threading.Thread(target=process_batch, args=(batch_id_1,))
+    t2 = threading.Thread(target=process_batch, args=(batch_id_2,))
+    t1.start()
+    t2.start()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    # with the cap at 1, the two batches' pipeline calls must never overlap
+    assert max_observed_concurrent == 1
+    assert _get_batch(batch_id_1).status == "completed"
+    assert _get_batch(batch_id_2).status == "completed"

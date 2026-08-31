@@ -14,7 +14,14 @@ from app.models import AudioResult, Batch, User
 from app.rate_limit import limiter
 from app.schemas import AudioResultOut, BatchDetailOut, BatchOut
 from app.services.batch_processor import process_batch
-from app.services.storage import cleanup_batch, extract_zip, find_manifest, list_audio_files
+from app.services.storage import (
+    UploadTooLargeError,
+    cleanup_batch,
+    extract_zip,
+    find_manifest,
+    list_audio_files,
+    save_upload_stream,
+)
 from app.utils.csv_manifest import parse_and_validate
 
 router = APIRouter(prefix="/batches", tags=["batches"])
@@ -26,8 +33,6 @@ RESULT_FIELDS = [
     "background_noise_type", "background_noise_severity", "audio_quality",
     "speaker_overlap_present", "long_silence_present", "confidence",
 ]
-
-UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1MB
 
 
 @router.post("", response_model=BatchDetailOut)
@@ -44,17 +49,16 @@ async def upload_batch(
         raise HTTPException(status_code=400, detail="Upload must be a .zip archive containing audio files and a CSV manifest")
 
     max_bytes = settings.max_upload_mb * 1024 * 1024
-    chunks = []
-    total_size = 0
-    while chunk := await file.read(UPLOAD_CHUNK_SIZE):
-        total_size += len(chunk)
-        if total_size > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Upload exceeds the {settings.max_upload_mb}MB limit",
-            )
-        chunks.append(chunk)
-    zip_bytes = b"".join(chunks)
+    try:
+        # Streamed to a temp file one chunk at a time rather than buffered
+        # into memory -- on a memory-constrained instance, several large
+        # uploads landing at once could otherwise OOM the process.
+        tmp_zip_path = await save_upload_stream(file, max_bytes)
+    except UploadTooLargeError:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload exceeds the {settings.max_upload_mb}MB limit",
+        )
 
     batch = Batch(name=name or file.filename, owner_id=user.id, status="pending")
     db.add(batch)
@@ -62,7 +66,7 @@ async def upload_batch(
     db.refresh(batch)
 
     try:
-        directory = extract_zip(zip_bytes, batch.id)
+        directory = extract_zip(tmp_zip_path, batch.id)
         audio_files = list_audio_files(directory)
         manifest_path = find_manifest(directory)
     except Exception:
