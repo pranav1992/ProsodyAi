@@ -131,7 +131,18 @@ mapping below).
 
 1. Collect more labeled calls to move validation from "hand-tuned on 3
    examples" to a real held-out split with statistically meaningful
-   per-class metrics.
+   per-class metrics. Two concrete, diagnosed items to prioritize once
+   more data exists (see VALIDATION.md's per-call root-cause notes):
+   (a) SNR-only noise detection missed both non-broadband noise types in
+   the labeled set (TV, static) despite correctly handling the synthetic
+   clean/noisy test cases — needs either a lower threshold validated
+   against more noise-type diversity, or a second acoustic signal beyond
+   SNR, not a threshold tweak against the same 2-3 examples that exposed
+   it; (b) `emotional_tone`'s zero-shot prompt has no guidance for
+   implicit/pattern-based distress signals (e.g. a customer repeating
+   "hello" and asking if they're talking to a bot) — worth a prompt
+   revision with a proper held-out re-validation pass, not a same-day
+   patch tuned to the exact calls that revealed the gap.
 2. If production audio is stereo (agent/customer channels), switch overlap
    detection to direct channel comparison — removes the biggest heuristic
    weak point in the pipeline.

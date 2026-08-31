@@ -62,28 +62,60 @@ is missed entirely — not by itself proof the model is unusable, but the
 directional pattern (missing `upset` and `satisfied`, defaulting toward
 `neutral`/`frustrated`) is a real signal, not just small-sample noise.
 
-## Per-call notes
+## Per-call notes (root cause, diagnosed 2026-08-31)
 
-1. `call_001`: predicted `neutral`/`low`, true `upset`/`high` — a large
-   miss in the exact direction the acoustic-vs-LLM split is supposed to
-   avoid (tone should come from transcript semantics, not loudness). Worth
-   inspecting the actual transcript faster-whisper produced for this call —
-   if transcription quality degraded, the LLM never had the right input.
-2. `call_002`: tone correct, but noise/severity wrong (predicted no noise,
-   true noise `TV`/medium) and intensity wrong. The acoustic SNR threshold
-   for `background_noise_present` likely doesn't generalize to a TV-type
-   noise profile — worth checking `snr_db` for this file directly.
-3. `call_003`: tone predicted `frustrated`, true `satisfied` — opposite
-   valence, not just adjacent-class noise. Also missed noise (`sharp
-   static`, medium) again. This call is the longest (172s); worth checking
-   whether transcription or classification degrades on longer audio.
+Re-ran the pipeline and inspected the actual transcript + acoustic features
+`classify()`/`analyze()` saw for each call, rather than guessing from the
+predictions alone. Root causes are now identified, not speculative — none
+were fixed (see rationale below the table), since a same-day fix tuned
+against these exact 3 calls would be the leakage the methodology section
+above explicitly warns against.
 
-**This is not yet a clean validation result** — it surfaces what looks like
-a real, fixable problem (systematic noise under-detection, tone
-misclassification skewing toward neutral/frustrated) rather than confirming
-the pipeline works. See the flagged items above before treating COST.md/
-LATENCY.md numbers derived from this run as representative of final
-accuracy.
+1. **`call_001`** — predicted `neutral`/`low`, true `upset`/`high`.
+   Transcript: *"...Are you a real person? Hello. Hello. Hello. Hello.
+   Hello. Hello. Yes, hello. I'm here."* — a customer repeating "hello"
+   and questioning if they're talking to a bot. A human reads this as
+   clear escalating frustration, but none of the words themselves are
+   angry vocabulary — the emotion is carried by the *repetition pattern*,
+   which `SYSTEM_PROMPT` (`app/pipeline/classify.py`) gives no explicit
+   guidance to recognize. **Root cause: prompt gap for implicit/pattern-
+   based distress signals, not a transcription or acoustic failure.**
+2. **`call_002`** — tone correct, but noise/severity wrong (predicted no
+   noise; true `TV`/medium) and intensity wrong. Measured `snr_db: 34.99`
+   — the acoustic layer sees this as clean audio; TV background noise
+   apparently doesn't depress SNR the way louder/broadband noise does, so
+   the SNR-only heuristic misses it entirely. The transcript is also
+   garbled (unexplained English/Spanish code-switching into nonsense
+   phrases), suggesting Whisper struggled with this audio too — likely
+   compounding the intensity miss. **Root cause: SNR-based noise detection
+   doesn't generalize to this noise type; possible secondary transcription
+   quality issue.**
+3. **`call_003`** — tone predicted `frustrated`, true `satisfied`; also
+   missed noise (`sharp static`, medium; measured `snr_db: 51.0`, same
+   noise-type-blind-spot as call_002). The transcript reads as a calm,
+   cooperative customer scheduling a service appointment — nothing in it
+   suggests frustration, so this looks like a genuine LLM misjudgment
+   with no obvious transcript-level explanation. **Root cause: unclear —
+   the transcript gives no textual signal pointing to `frustrated`,
+   unlike call_001 where the pattern is at least visible in hindsight.**
+
+**Why these weren't patched before submission:** two calls (`call_002`,
+`call_003`) share the same failure mode — SNR alone misses non-broadband
+noise types (TV, static) — but "fixing" that from n=2 examples means
+picking a new threshold that fits exactly these two calls, which is the
+overfitting risk this document's methodology section already flags, not a
+validated generalization. The `call_001` prompt gap is more plausibly
+fixable (add explicit repetition/dead-air guidance to `SYSTEM_PROMPT`),
+but doing that as an untested last-minute change immediately before
+evaluation, with no re-validation window, trades a known/disclosed gap for
+an unknown regression risk. Both are flagged here as the concrete next
+step (see "Next steps" in MEMO.md) rather than patched blind.
+
+**This is not yet a clean validation result** — it surfaces real, now
+root-caused problems (noise-type detection blind spot, at least one
+diagnosable tone-classification prompt gap) rather than confirming the
+pipeline works. See the notes above before treating COST.md/LATENCY.md
+numbers derived from this run as representative of final accuracy.
 
 ## Known gaps in this validation
 
