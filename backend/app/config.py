@@ -18,6 +18,7 @@ class Settings:
     storage_dir: str = os.getenv("STORAGE_DIR", "./storage")
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "200"))
     max_concurrent_batches: int = int(os.getenv("MAX_CONCURRENT_BATCHES", "2"))
+    max_concurrent_uploads: int = int(os.getenv("MAX_CONCURRENT_UPLOADS", "4"))
 
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 

@@ -1,8 +1,15 @@
+import asyncio
 import io
+import threading
+import time
 import zipfile
 
+import httpx
+
+import app.routes.batches as batches_module
 from app.auth import hash_password
 from app.database import SessionLocal
+from app.main import app as fastapi_app
 from app.models import Batch, User
 
 from conftest import build_zip, valid_batch_zip
@@ -168,3 +175,51 @@ def test_download_results_json(client, auth_headers, monkeypatch):
     assert resp.status_code == 200
     payload = resp.json()
     assert payload[0]["name"] == "call_001.wav"
+
+
+def test_concurrent_uploads_are_capped_regardless_of_caller(client, auth_headers, monkeypatch):
+    # Force the cap down to 1 for a deterministic test, regardless of the
+    # configured MAX_CONCURRENT_UPLOADS default. This is the fix for: the
+    # per-IP rate limit alone doesn't bound how many uploads can be
+    # streaming/extracting to disk at the exact same instant.
+    monkeypatch.setattr(batches_module, "_upload_semaphore", asyncio.Semaphore(1))
+    _mock_process_batch(monkeypatch)
+
+    concurrent = 0
+    max_observed_concurrent = 0
+    lock = threading.Lock()
+    real_extract_zip = batches_module.extract_zip
+
+    def _tracking_extract_zip(zip_path, batch_id):
+        nonlocal concurrent, max_observed_concurrent
+        with lock:
+            concurrent += 1
+            max_observed_concurrent = max(max_observed_concurrent, concurrent)
+        time.sleep(0.2)
+        try:
+            return real_extract_zip(zip_path, batch_id)
+        finally:
+            with lock:
+                concurrent -= 1
+
+    monkeypatch.setattr(batches_module, "extract_zip", _tracking_extract_zip)
+
+    async def _do_concurrent_uploads():
+        transport = httpx.ASGITransport(app=fastapi_app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            tasks = [
+                ac.post(
+                    "/batches",
+                    headers=auth_headers,
+                    files={"file": (f"archive-{i}.zip", valid_batch_zip(), "application/zip")},
+                )
+                for i in range(3)
+            ]
+            return await asyncio.gather(*tasks)
+
+    responses = asyncio.run(_do_concurrent_uploads())
+
+    assert [r.status_code for r in responses] == [200, 200, 200]
+    # with the cap at 1, no two uploads' extraction ever overlapped, even
+    # though all 3 requests were fired at the same time
+    assert max_observed_concurrent == 1

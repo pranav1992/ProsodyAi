@@ -111,17 +111,21 @@ mapping below).
 - **Concurrent-upload/processing safety on a memory-constrained pilot
   instance (handled).** A `t3.medium` has 4GB RAM and 2 vCPUs shared across
   Postgres, the frontend, and the backend. Uploads were previously buffered
-  fully into memory before being written to disk, and batch processing had
-  no concurrency limit — several large uploads or batches landing around
-  the same time could OOM the instance or thrash the 2 vCPUs against each
-  other, and the per-IP upload rate limit doesn't protect against this
-  since it doesn't coordinate across different users. `save_upload_stream()`
-  now writes uploads to disk incrementally regardless of size, and
-  `process_batch()` is capped by a `threading.Semaphore` (default 2
-  concurrent batches, `MAX_CONCURRENT_BATCHES` env var) — extra batches
-  wait in `"pending"` for a slot rather than all running at once. See
-  README's Scaling plan for the baseline-safety note and what's still
-  deferred (a real worker queue) versus what's already fixed.
+  fully into memory before being written to disk, uploads had no
+  concurrency limit, and batch processing had no concurrency limit either
+  — several large uploads or batches landing around the same time could
+  OOM the instance or thrash the 2 vCPUs against each other. The per-IP
+  rate limit (`3/hour`) doesn't protect against this: it throttles one IP
+  over time, not many *different* users' requests landing in the same
+  instant. Three fixes, all in place: `save_upload_stream()` writes
+  uploads to disk incrementally regardless of size; `upload_batch()` is
+  capped by an `asyncio.Semaphore` (`MAX_CONCURRENT_UPLOADS`, default 4)
+  bounding simultaneous streaming/extraction; `process_batch()` is capped
+  separately by a `threading.Semaphore` (`MAX_CONCURRENT_BATCHES`, default
+  2) bounding simultaneous CPU-bound transcription. Extra requests/batches
+  wait their turn rather than all running at once. See README's Scaling
+  plan for the baseline-safety note and what's still deferred (a real
+  worker queue) versus what's already fixed.
 
 ## Next steps with more time/data
 

@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import io
 import json
@@ -34,6 +35,16 @@ RESULT_FIELDS = [
     "speaker_overlap_present", "long_silence_present", "confidence",
 ]
 
+# The per-IP rate limit above doesn't protect against many *different*
+# users uploading around the same time -- it only throttles one IP
+# hammering the endpoint. This bounds actual simultaneous uploads
+# regardless of how many distinct users trigger them, so streaming/
+# extraction for a burst of concurrent requests doesn't all run at once
+# and saturate disk I/O. asyncio.Semaphore (not threading.Semaphore) is
+# correct here since this route runs on the event loop, unlike
+# process_batch() which runs on a background thread.
+_upload_semaphore = asyncio.Semaphore(settings.max_concurrent_uploads)
+
 
 @router.post("", response_model=BatchDetailOut)
 @limiter.limit("3/hour;10/day")
@@ -48,6 +59,17 @@ async def upload_batch(
     if not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="Upload must be a .zip archive containing audio files and a CSV manifest")
 
+    async with _upload_semaphore:
+        return await _process_upload(file, name, background_tasks, db, user)
+
+
+async def _process_upload(
+    file: UploadFile,
+    name: str,
+    background_tasks: BackgroundTasks,
+    db: Session,
+    user: User,
+) -> BatchDetailOut:
     max_bytes = settings.max_upload_mb * 1024 * 1024
     try:
         # Streamed to a temp file one chunk at a time rather than buffered

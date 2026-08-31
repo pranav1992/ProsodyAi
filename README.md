@@ -217,18 +217,32 @@ processing time, so that's the first thing to scale, not the API tier.
 
 **Baseline concurrency safety (already in place, not deferred):** on a
 `t3.medium` (2 vCPU, 4GB RAM), uploads used to be buffered fully into
-memory before touching disk and batch processing had no concurrency
-limit — a handful of large uploads or several batches landing at once
-could OOM the instance or thrash the 2 vCPUs against each other. Both are
-fixed now: `save_upload_stream()` (`app/services/storage.py`) writes
-uploads to disk one chunk at a time regardless of size, and
-`process_batch()` (`app/services/batch_processor.py`) is capped by a
-`threading.Semaphore(MAX_CONCURRENT_BATCHES)` (default 2, configurable via
-env var) — batches beyond the cap simply wait in `"pending"` for a slot,
-which the dashboard already renders correctly. This is a real ceiling, not
-just a rate limit: the per-IP upload rate limit (3/hour) doesn't protect
-against many *different* users uploading around the same time, but the
-semaphore does, regardless of how many users trigger it.
+memory before touching disk, uploads had no concurrency limit at all, and
+batch processing had no concurrency limit either — a handful of large
+uploads or several batches landing at once could OOM the instance or
+thrash the 2 vCPUs against each other. All three are fixed now:
+
+- `save_upload_stream()` (`app/services/storage.py`) writes uploads to
+  disk one chunk at a time regardless of size.
+- `upload_batch()` (`app/routes/batches.py`) is capped by an
+  `asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)` (default 4) — bounds how
+  many uploads can be streaming/extracting to disk *at the exact same
+  instant*, which the per-IP rate limit alone can't do: `3/hour` throttles
+  one IP hammering the endpoint over time, but says nothing about 20
+  *different* users' requests all landing in the same second. Requests
+  beyond the cap simply wait their turn (nginx's `proxy_read_timeout` is
+  300s, generous headroom for a short queue).
+- `process_batch()` (`app/services/batch_processor.py`) is capped
+  separately by a `threading.Semaphore(MAX_CONCURRENT_BATCHES)` (default
+  2) — this is a distinct cap from uploads, since processing
+  (CPU-bound transcription) and uploading (I/O-bound streaming) compete
+  for different resources. Batches beyond this cap wait in `"pending"`,
+  which the dashboard already renders correctly.
+
+Both semaphore types matter: `asyncio.Semaphore` for the upload route
+(runs on the event loop) vs. `threading.Semaphore` for batch processing
+(runs on a background thread via `BackgroundTasks` → anyio's threadpool) —
+mixing them up wouldn't coordinate correctly across the two contexts.
 
 | Trigger | What's scaled | Change |
 |---|---|---|
