@@ -145,10 +145,21 @@ For a single-instance pilot deployment — the cheapest/simplest option, see
 the tradeoffs at the end of this section — `deploy/provision-ec2.sh` scripts
 the whole thing: one `t3.medium` running all three containers via Docker Compose,
 behind a fixed Elastic IP, with nginx (`deploy/nginx/prosodyai.conf`) as the
-single public entry point on port 80. The security group only exposes SSH to
-your current IP and port 80 to the public — the backend/frontend container
-ports (8000/3000) are bound to loopback only, and the database is never
-exposed.
+single public entry point on port 80. Port 80 is public and the
+backend/frontend container ports (8000/3000) are bound to loopback only, so
+the database is never exposed regardless of the SSH posture below.
+
+**SSH (port 22) is open to all IPs (`0.0.0.0/0`), not restricted to a
+single IP as `provision-ec2.sh` sets up initially.** This was changed so
+`.github/workflows/deploy.yml` (the "Deploy to EC2" action) can SSH in —
+GitHub Actions' hosted runners come from large, rotating IP ranges with no
+fixed address to allowlist, so a single-IP security group rule blocks CI
+deploys entirely. Key-based auth is still required to actually log in;
+this only widens who can *attempt* a connection, not who can authenticate.
+The more correct fix — a self-hosted Actions runner on the instance itself,
+polling GitHub outbound instead of accepting inbound SSH — removes this
+exposure entirely and is a real next step, not done here under pilot
+time constraints.
 
 Whisper transcription runs on CPU by default (`WHISPER_DEVICE=cpu`,
 `WHISPER_MODEL_SIZE=base`) — no GPU instance required, which keeps hosting
