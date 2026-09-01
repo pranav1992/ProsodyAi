@@ -34,8 +34,8 @@ split was chosen over sending raw audio to an audio-native model.
 backend/     FastAPI service: pipeline, batch processing, auth, REST API
 frontend/    Next.js dashboard: login, batch upload, results, download
 scripts/     (in backend/) leave-one-call-out validation script
-deploy/               AWS EC2 pilot: provision/stop/start/destroy scripts (see below)
-.github/workflows/    GitHub Actions: manually-triggered deploy to EC2
+deploy/               AWS EC2 pilot: provision/stop/start/destroy/redeploy scripts (see below)
+.github/workflows/    GitHub Actions: backend test suite (runs on push/PR to main)
 docker-compose.yml    local dev: postgres + backend + frontend
 ```
 
@@ -149,17 +149,15 @@ single public entry point on port 80. Port 80 is public and the
 backend/frontend container ports (8000/3000) are bound to loopback only, so
 the database is never exposed regardless of the SSH posture below.
 
-**SSH (port 22) is open to all IPs (`0.0.0.0/0`), not restricted to a
-single IP as `provision-ec2.sh` sets up initially.** This was changed so
-`.github/workflows/deploy.yml` (the "Deploy to EC2" action) can SSH in —
-GitHub Actions' hosted runners come from large, rotating IP ranges with no
-fixed address to allowlist, so a single-IP security group rule blocks CI
-deploys entirely. Key-based auth is still required to actually log in;
-this only widens who can *attempt* a connection, not who can authenticate.
-The more correct fix — a self-hosted Actions runner on the instance itself,
-polling GitHub outbound instead of accepting inbound SSH — removes this
-exposure entirely and is a real next step, not done here under pilot
-time constraints.
+SSH (port 22) is restricted to a single IP, per `provision-ec2.sh`'s
+default. If your IP changes (common on a residential/mobile connection)
+and `deploy/redeploy.sh` times out connecting, update the rule:
+
+```bash
+SG_ID=$(grep SG_ID deploy/.state | cut -d= -f2)
+aws ec2 revoke-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22 --cidr OLD_IP/32 --region ap-south-1
+aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22 --cidr "$(curl -s https://checkip.amazonaws.com)/32" --region ap-south-1
+```
 
 Whisper transcription runs on CPU by default (`WHISPER_DEVICE=cpu`,
 `WHISPER_MODEL_SIZE=base`) — no GPU instance required, which keeps hosting
@@ -182,18 +180,26 @@ matching teardown script knows what to remove:
 ./deploy/destroy-ec2.sh
 ```
 
-**Deploy via GitHub Actions (manual trigger):** `.github/workflows/deploy.yml`
-SSHes into the instance, runs `git pull && docker compose up -d --build`, and
-resyncs the nginx config in case `deploy/nginx/prosodyai.conf` changed. It
-does *not* run automatically on push — trigger it from the repo's Actions
-tab (`Deploy to EC2` → `Run workflow`) whenever you actually want to ship
-what's on `main`. It needs two repository secrets (Settings → Secrets and
-variables → Actions), which you should set directly from your own machine
-rather than routing the private key through anyone else:
+**Redeploying (manual, from your own machine):**
 
-- `EC2_HOST` — the instance's Elastic IP
-- `EC2_SSH_KEY` — contents of the `.pem` file `provision-ec2.sh` saved to
-  `~/.ssh/prosodyai-pilot.pem`
+```bash
+./deploy/redeploy.sh
+```
+
+SSHes into the instance, runs `git pull && docker compose up -d --build`,
+and resyncs the nginx config in case `deploy/nginx/prosodyai.conf` changed.
+This is deliberately *not* automated via GitHub Actions: a GitHub-hosted
+runner has no fixed IP to allowlist for SSH (would mean opening port 22 to
+the world), and a self-hosted runner on the instance is unsafe on a public
+repo (GitHub's own guidance: don't run self-hosted runners on public
+repos — a malicious PR could execute arbitrary code on this box). For a
+single-pilot-instance, manually-triggered deploy, the security cost of
+either option outweighs the convenience of a browser button over a
+one-line local command. AWS Systems Manager Run Command (no SSH port
+needed at all, hosted runner stays safe) is the correct fix if this ever
+needs to be automated — noted as a next step, not done here (needs an IAM
+role attached to the instance, which the restricted deploy credentials
+used day-to-day can't create).
 
 **Cost:** roughly $30–35/month for continuous `t3.medium` + 30GB gp3 +
 Elastic IP. Stop the instance when not in use to only pay for storage
