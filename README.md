@@ -6,7 +6,9 @@ batch-upload dashboard.
 
 See [MEMO.md](MEMO.md) for architecture and rationale, [VALIDATION.md](VALIDATION.md)
 for accuracy/F1/confusion-matrix results, [COST.md](COST.md) and [LATENCY.md](LATENCY.md)
-for the cost/latency analysis required by the brief.
+for the cost/latency analysis required by the brief, and
+[predictions/](predictions/) for the actual hosted-dashboard output on the
+three provided calls.
 
 ## Architecture
 
